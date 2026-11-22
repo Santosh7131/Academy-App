@@ -1,5 +1,5 @@
 # Renders the 2-page sample question paper (design/comps/paper/sample.html) to JPEGs in tools/out/paper/.
-# Needs the comp server running on 127.0.0.1:8777 (preview "comps").
+# Needs the comp server running on 127.0.0.1:18777 (preview "comps").
 $chrome = 'C:\Program Files\Google\Chrome\Application\chrome.exe'
 $root = Split-Path $PSScriptRoot -Parent
 $out = Join-Path $root 'tools\out\paper'
@@ -12,7 +12,7 @@ $params.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.D
 foreach ($n in 1, 2) {
   $png = Join-Path $out "page$n.png"
   & $chrome --headless=new --disable-gpu --hide-scrollbars --no-first-run --user-data-dir="$env:TEMP\ca-shoot-profile" `
-    --window-size=1240,1754 --virtual-time-budget=8000 --screenshot="$png" "http://127.0.0.1:8777/paper/sample.html?page=$n" 2>$null | Out-Null
+    --window-size=1240,1754 --virtual-time-budget=8000 --screenshot="$png" "http://127.0.0.1:18777/paper/sample.html?page=$n" 2>$null | Out-Null
   $img = [System.Drawing.Image]::FromFile($png)
   $jpg = Join-Path $out "page$n.jpg"
   $img.Save($jpg, $jpeg, $params)

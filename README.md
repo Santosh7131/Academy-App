@@ -752,7 +752,7 @@ at a time, grey placeholder rows with a soft light passing over them while a lis
 count up, the press scale and a chosen option settling into place (`app/lib/ui/motion.dart`). Everything
 stands still when the phone's "remove animations" setting is on. No spinners.
 
-To view the comps, run `python -m http.server 8777 --bind 127.0.0.1 --directory design/comps`.
+To view the comps, run `python -m http.server 18777 --bind 127.0.0.1 --directory design/comps`.
 
 ## Secrets
 

@@ -1,5 +1,5 @@
 # Screenshots admin-app mockups side by side (two phones per image) with headless Chrome.
-# Needs the comp server on 127.0.0.1:8777:  py -3 -m http.server 8777 --directory design/comps
+# Needs the comp server on 127.0.0.1:18777:  py -3 -m http.server 18777 --directory design/comps
 #   .\tools\shoot-admin-comps.ps1 -Pairs 'admin-a-overview,admin-b-overview'
 param([string[]]$Pairs = @('admin-a-overview,admin-a-people'))
 
@@ -12,7 +12,7 @@ foreach ($pair in $Pairs) {
   $l, $r = $pair.Split(',')
   $name = if ($r) { "$l+$r" } else { $l }
   $file = Join-Path (Resolve-Path $out) "$name.png"
-  $url = "http://127.0.0.1:8777/admin-board.html?l=$l" + $(if ($r) { "&r=$r" } else { '' })
+  $url = "http://127.0.0.1:18777/admin-board.html?l=$l" + $(if ($r) { "&r=$r" } else { '' })
   & $chrome --headless=new --disable-gpu --hide-scrollbars --no-first-run --no-default-browser-check `
     --user-data-dir="$profileDir" --force-device-scale-factor=2 --window-size=898,894 `
     --virtual-time-budget=8000 --screenshot="$file" $url 2>$null | Out-Null

@@ -1,0 +1,60 @@
+<!doctype html>
+<!--
+  The launcher icon: a bold tick, the mark a marked test gets, in the primary-action colours
+  (actionFill #0E0E11, actionInk #FAFAFB). It names no product, so it stands until the product's name
+  and its own mark are chosen. No accent: violet belongs to the AI paper reader.
+  Rendered by tools/make-icon.ps1:  ?layer=foreground  adaptive-icon foreground (108-unit canvas,
+  mark inside the 66-unit safe circle);  ?layer=legacy  the rounded-square icon for old Androids;
+  ?layer=preview  a review sheet.  &app=admin draws the admin app's icon: the same mark with the
+  two colours swapped, so the two apps never get mixed up on a home screen.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; background: transparent; }
+  svg { display: block; }
+  body.preview { background: #FAFAFB; font: 500 22px/1.3 system-ui, sans-serif; color: #3A3A42; padding: 48px; }
+  .row { display: flex; gap: 48px; align-items: center; margin-bottom: 40px; }
+  .cap { margin-top: 12px; text-align: center; }
+  .mask-circle { border-radius: 50%; overflow: hidden; }
+  .mask-squircle { border-radius: 30%; overflow: hidden; }
+  .dark { background: #0C0C0F; padding: 32px; border-radius: 24px; }
+</style>
+</head>
+<body>
+<script>
+  const params = new URLSearchParams(location.search);
+  const layer = params.get('layer') || 'preview';
+  const admin = params.get('app') === 'admin';
+  // The admin app's icon is the same mark in the same two colours, swapped, so the two apps never get mixed up.
+  const INK = admin ? '#FAFAFB' : '#0E0E11', PAPER = admin ? '#0E0E11' : '#FAFAFB';
+  // The mark on a 108-unit canvas: a tick, centred on its own box, inside the 66-unit safe circle.
+  const mark = (color, scale = 1) => `
+    <g transform="translate(54 54) scale(${scale}) translate(-54 -54)">
+      <path d="M 34.2 54.3 L 48 68 L 73.8 39.9" fill="none" stroke="${color}" stroke-width="10.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>`;
+  const svg = (size, inner) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 108 108" width="${size}" height="${size}">${inner}</svg>`;
+  const full = (size) => svg(size, `<rect width="108" height="108" fill="${INK}"/>${mark(PAPER)}`);
+
+  if (layer === 'foreground') {
+    document.body.innerHTML = svg(1024, mark(PAPER));
+  } else if (layer === 'legacy') {
+    document.body.innerHTML = svg(1024, `<rect x="4" y="4" width="100" height="100" rx="24" fill="${INK}"/>${mark(PAPER, 1.3)}`);
+  } else {
+    document.body.className = 'preview';
+    document.body.innerHTML = `
+      <div class="row">
+        <div><div class="mask-circle">${full(360)}</div><div class="cap">Circle mask</div></div>
+        <div><div class="mask-squircle">${full(360)}</div><div class="cap">Squircle mask</div></div>
+        <div>${svg(360, `<rect x="4" y="4" width="100" height="100" rx="24" fill="${INK}"/>${mark(PAPER, 1.3)}`)}<div class="cap">Older Android</div></div>
+      </div>
+      <div class="row">
+        ${[192, 144, 96, 72, 48].map((s) => `<div><div class="mask-circle">${full(s)}</div><div class="cap">${s}px</div></div>`).join('')}
+        <div class="dark"><div class="mask-circle">${full(144)}</div><div class="cap" style="color:#90909C">On a dark home screen</div></div>
+        <div><div class="mask-circle">${svg(144, `<rect width="108" height="108" fill="#E8E2F4"/>${mark('#3B3355')}`)}</div><div class="cap">Themed icon</div></div>
+      </div>`;
+  }
+</script>
+</body>
+</html>

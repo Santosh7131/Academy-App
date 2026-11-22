@@ -1,0 +1,112 @@
+/* x1: the extras for 1.8.0 (2026-11-03): a test left open for a week, Library search and order, difficulty tags,
+   an update offered before Start, and storage in the developer app.
+   Builds on tokens.css + comp.css + v12.css + v14.css + w1.css + c1.css + w2.css + w3.css + w4.css + q1.css.
+   Sample data only: every name, number, size and time on these screens is made up. */
+
+/* ---- a test left open for a week: a Needs-you card with two buttons */
+.stale{background:var(--surface);border-radius:20px;box-shadow:var(--e1);padding:14px 16px 14px}
+:root[data-theme="dark"] .stale{border:1px solid var(--hair)}
+.stale .sh{display:flex;align-items:center;gap:14px}
+.stale .ic{width:42px;height:42px;border-radius:13px;background:var(--wn-soft);color:var(--wn);display:grid;place-items:center;font-size:21px;flex:none}
+.stale .k{font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--wn)}
+.stale .t{font-size:15px;font-weight:700;letter-spacing:-.03em;color:var(--ink);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stale .meta{margin-top:2px}
+.stale .acts{display:flex;gap:8px;margin-top:13px}
+.stale .acts .b{flex:1;min-width:0;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;font-weight:700;letter-spacing:-.02em;background:var(--sunk);color:var(--ink);white-space:nowrap}
+.stale .acts .b.on{background:var(--action);color:var(--action-ink);box-shadow:var(--e2)}
+.stale .acts .b i{font-size:15px}
+.stale + .stale{margin-top:10px}
+
+/* the confirm cards that follow */
+.choice .cbody .wh{font-weight:600;color:var(--ink)}
+.choice .cbtns .btn{margin-top:0}
+.choice .cbody ul{list-style:none;display:flex;flex-direction:column;gap:9px;margin-top:12px}
+.choice .cbody li{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;font-weight:500;letter-spacing:-.018em;line-height:1.45;color:var(--body)}
+.choice .cbody li i{font-size:17px;color:var(--muted);flex:none;margin-top:1px}
+.choice .cbody li b{font-weight:600;color:var(--ink)}
+
+/* ---- notifications, as the phone draws them */
+.shade{padding:18px 14px 0;display:flex;flex-direction:column;gap:6px}
+.ncap{margin:14px 8px 4px;font-size:12px;font-weight:700;letter-spacing:-.01em;color:var(--ink)}
+.ncap span{display:block;margin-top:2px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.nt{background:var(--surface);border-radius:22px;box-shadow:var(--e2);padding:12px 15px 14px}
+:root[data-theme="dark"] .nt{border:1px solid var(--hair)}
+.nt .ntop{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.nt .app{width:18px;height:18px;border-radius:6px;background:var(--action);color:var(--action-ink);display:grid;place-items:center;font-size:11px;flex:none}
+.nt .ntop .when{margin-left:auto}
+.nt .nttl{font-size:14.5px;font-weight:700;letter-spacing:-.026em;color:var(--ink);margin-top:8px}
+.nt .nbody{font-size:13px;font-weight:500;color:var(--body);line-height:1.42;margin-top:3px;letter-spacing:-.012em}
+
+/* ---- the Library: a search field, what it found, and the order menus */
+.lsearch{margin-top:14px}
+.lsearch .search{margin-top:0}
+.search.typed{color:var(--ink);font-weight:600}
+.search.typed i.mag{color:var(--muted)}
+.search .clr{margin-left:auto;width:28px;height:28px;border-radius:999px;background:var(--sunk);display:grid;place-items:center;font-size:14px;color:var(--muted);flex:none}
+.search .caret{display:inline-block;width:1.5px;height:17px;background:var(--ink);margin-left:-8px;border-radius:2px}
+.found{margin-top:14px}
+.found .frow .fn b{font-weight:800}
+.found .none{margin:34px 24px 0;text-align:center;font-size:13.5px;font-weight:500;letter-spacing:-.02em;line-height:1.5;color:var(--muted)}
+.found .none b{font-weight:600;color:var(--ink)}
+.fm .sec2{color:var(--ink);font-weight:700}
+
+/* ---- difficulty: a small ladder of bars and a word. Plain for the tutor's own choice, purple while it is AI's guess. */
+.lv{height:24px;padding:0 10px 0 8px;border-radius:999px;display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:-.01em;background:var(--sunk);color:var(--ink);flex:none;white-space:nowrap}
+.lv .bars{display:inline-flex;align-items:flex-end;gap:2px;height:11px}
+.lv .bars b{width:3px;border-radius:2px;background:currentColor;opacity:.28}
+.lv .bars b:nth-child(1){height:5px}
+.lv .bars b:nth-child(2){height:8px}
+.lv .bars b:nth-child(3){height:11px}
+.lv .bars b.f{opacity:1}
+.lv.ai{background:var(--accent-soft);color:var(--accent)}
+.lv.none{background:transparent;box-shadow:inset 0 0 0 1px #DEDEE6;color:var(--muted)}
+:root[data-theme="dark"] .lv.none{box-shadow:inset 0 0 0 1px #3A3A44}
+.nc .top .lv{margin-left:auto}
+.nc .top .lv + .tag{margin-left:0}
+
+.selfld{display:flex;align-items:center;gap:10px;padding:0 14px 0 16px;border-radius:15px;background:var(--surface);box-shadow:var(--e1);font-size:14.5px;font-weight:600;color:var(--ink);letter-spacing:-.02em;min-height:48px}
+:root[data-theme="dark"] .selfld{border:1px solid var(--hair)}
+.selfld .lv{margin-left:0}
+.selfld .caret2{margin-left:auto;font-size:15px;color:var(--faint)}
+.aihint{display:flex;align-items:flex-start;gap:8px;margin-top:9px;font-size:12px;font-weight:600;color:var(--accent);letter-spacing:-.01em;line-height:1.42}
+.aihint i{font-size:15px;flex:none;margin-top:0}
+
+.pq{display:flex;align-items:center;gap:13px;padding:12px 14px 12px 15px;background:var(--surface);border-radius:20px;box-shadow:var(--e1)}
+:root[data-theme="dark"] .pq{border:1px solid var(--hair)}
+.pq .ck{width:24px;height:24px;border-radius:999px;border:1.8px solid #DEDEE6;flex:none;display:grid;place-items:center;font-size:13px;color:transparent}
+:root[data-theme="dark"] .pq .ck{border-color:#3A3A44}
+.pq.on .ck{background:var(--action);border-color:var(--action);color:var(--action-ink)}
+.pq .qt2{font-size:14px;font-weight:600;letter-spacing:-.024em;line-height:1.38;color:var(--ink);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pq .meta{margin-top:3px}
+.pq .lv{align-self:flex-start;margin-top:1px}
+.addall{display:inline-block;margin-top:12px;font-size:13px;font-weight:700;letter-spacing:-.02em;color:var(--ink)}
+.mix{font-weight:600;color:var(--ink)}
+.opt2 .lv{margin-right:2px}
+
+/* ---- an update offered before a test starts */
+.choice .uic2{width:46px;height:46px;border-radius:999px;background:var(--sunk);display:grid;place-items:center;font-size:24px;color:var(--ink);margin:2px 22px 0}
+.choice .textbtn{display:grid;place-items:center;height:42px;margin-top:6px;font-size:13.5px;font-weight:700;letter-spacing:-.02em;color:var(--muted)}
+.upd .track{width:100%}
+
+/* ---- storage in the developer's app */
+.store{padding:15px 17px 15px}
+.store .sh{display:flex;align-items:baseline;gap:8px}
+.store .sh .lab:first-child{flex:1}
+.store .sh .lab.r{flex:none}
+.store .big{font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:-.045em;color:var(--ink);line-height:1.1;margin-top:7px}
+.store .big small{font-size:13px;font-weight:600;letter-spacing:-.02em;color:var(--muted);margin-left:4px}
+.store .track{margin-top:12px}
+.store .track i.wn{background:var(--wn)}
+.store .parts{margin-top:12px;display:flex;flex-direction:column}
+.store .part{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--hair);font-size:13px;font-weight:500;color:var(--muted);letter-spacing:-.01em}
+.store .part:first-child{border-top:0}
+.store .part b{margin-left:auto;font-family:var(--mono);font-size:13.5px;font-weight:600;color:var(--ink);letter-spacing:-.04em}
+.crow .mt .wn2{color:var(--wn)}
+.stat2{background:var(--surface);border-radius:26px;box-shadow:var(--e3);padding:18px 20px 18px}
+:root[data-theme="dark"] .stat2{border:1px solid var(--hair)}
+.stat2 .big{font-family:var(--mono);font-size:44px;font-weight:700;letter-spacing:-.045em;line-height:1;color:var(--ink);margin-top:9px}
+.stat2 .note{margin-top:8px;padding:0;text-align:left;font-size:12.5px;font-weight:600;color:var(--muted)}
+.stat2 .two{display:flex;gap:10px;margin-top:14px}
+.stat2 .two > div{flex:1;border-radius:14px;background:var(--sunk);padding:10px 13px}
+.stat2 .two .l{font-size:11px;font-weight:600;color:var(--muted)}
+.stat2 .two .v{font-family:var(--mono);font-size:17px;font-weight:700;letter-spacing:-.04em;color:var(--ink);margin-top:2px}

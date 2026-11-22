@@ -1,0 +1,236 @@
+import { Hono } from 'hono';
+import { requireUser, tuitionOf, type AppEnv } from '../lib/auth.ts';
+import { ASSIGNED, isWriting, resultPayload, saveAnswers, startOrResume, submitAttempt } from '../lib/attempts.ts';
+import { knowsMoreOptions, updateRequired } from '../lib/client.ts';
+import { pool, q, q1, tq, tq1 } from '../lib/db.ts';
+import { HttpError, notFound, uuid } from '../lib/http.ts';
+import { LEVELS_JSON } from '../lib/levels.ts';
+import { studentFileCount } from '../lib/library.ts';
+import { readCode } from '../lib/tuition.ts';
+import { readBody } from './body.ts';
+import { studentLibrary } from './library.ts';
+
+// A student's tuitions, and asking to join one. These need no active tuition, so a student who is
+// still waiting to be let in can open them. Mounted before studentRoutes, whose middleware refuses
+// a student with no tuition.
+export const studentOpenRoutes = new Hono<AppEnv>();
+
+/** The tuitions the student is in or waiting to join. The app switches between them with the x-tuition header. */
+studentOpenRoutes.get('/tuitions', requireUser('student', { tuition: 'none' }), async (c) => {
+  const rows = await q(
+    `select t.id, t.name, m.status, m.class_level, m.joined_at, ${LEVELS_JSON}
+       from memberships m join tuitions t on t.id = m.tuition_id
+      where m.user_id = $1 and m.role = 'student' and m.status in ('active', 'pending')
+      order by m.joined_at`,
+    [c.get('user').id],
+  );
+  return c.json({ tuitions: rows });
+});
+
+const MAX_WRONG_CODES = 8;
+
+/**
+ * Asks to join a tuition with its code. The student waits (status pending) until a tutor lets them
+ * in, so a code that gets passed around cannot put strangers into a tuition. Wrong codes are
+ * counted, so a code cannot be guessed.
+ */
+studentOpenRoutes.post('/join', requireUser('student', { tuition: 'none' }), async (c) => {
+  const me = c.get('user');
+  const code = readCode((await readBody(c)).code);
+  const wrong = await q1(`select count(*) as n from join_attempts where user_id = $1 and not ok and at > now() - interval '1 hour'`, [me.id]);
+  if (wrong.n >= MAX_WRONG_CODES) throw new HttpError(429, 'too_many_tries', 'Too many wrong codes. Please try again in an hour.');
+  const t = await q1<{ id: string; name: string; join_open: boolean }>('select id, name, join_open from tuitions where join_code = $1', [code]);
+  if (!t) {
+    await pool.query('insert into join_attempts (user_id, ok) values ($1, false)', [me.id]);
+    throw new HttpError(404, 'unknown_code', 'No tuition has that code. Check it with your tutor.');
+  }
+  const have = await q1<{ status: string }>('select status from memberships where tuition_id = $1 and user_id = $2', [t.id, me.id]);
+  if (have?.status === 'active') throw new HttpError(409, 'already_member', `You are already in ${t.name}.`);
+  if (have?.status === 'off') throw new HttpError(403, 'turned_off', `${t.name} has turned off your place. Please ask your tutor.`);
+  if (have?.status === 'pending') return c.json({ tuition: { id: t.id, name: t.name }, status: 'pending' });
+  if (!t.join_open) throw new HttpError(403, 'not_joinable', `${t.name} is not taking new students right now.`);
+  await pool.query(
+    `insert into memberships (tuition_id, user_id, role, status, class_level) values ($1, $2, 'student', 'pending', $3)`,
+    [t.id, me.id, me.class_level],
+  );
+  await pool.query('insert into join_attempts (user_id, ok) values ($1, true)', [me.id]);
+  return c.json({ tuition: { id: t.id, name: t.name }, status: 'pending' }, 201);
+});
+
+export const studentRoutes = new Hono<AppEnv>();
+studentRoutes.use('*', requireUser('student'));
+// The Library: the files of the student's groups and courses, to read and download (routes/library.ts).
+studentRoutes.route('/', studentLibrary);
+
+type TestState = 'open' | 'in_progress' | 'upcoming' | 'done' | 'missed';
+
+/**
+ * The tests a student is given, each with the student's latest attempt at it. `joined` is the SQL for when the
+ * student became one of the people it is given to (the tuition, or the course), and `where` picks the tests.
+ * $1 is the student.
+ */
+const testRows = (joined: string, where: string) => `select t.id, t.course_id, t.title, t.class_level, t.time_limit_min, t.opens_at, t.closes_at, now() as now,
+            (select count(*) from test_questions tq where tq.test_id = t.id) as question_count,
+            (select coalesce(sum(qq.marks), 0) from test_questions tq join questions qq on qq.id = tq.question_id
+              where tq.test_id = t.id) as max_marks,
+            la.id as attempt_id, la.attempt_no, la.submitted_at, la.deadline_at, la.score, la.max_score,
+            exists (select 1 from retake_grants g where g.test_id = t.id and g.student_id = $1 and g.used_at is null) as retake,
+            ${joined} as joined_at
+       from tests t
+       left join lateral (select * from attempts a where a.test_id = t.id and a.student_id = $1
+                           order by a.attempt_no desc limit 1) la on true
+      where ${where}
+      order by coalesce(t.closes_at, t.opens_at, t.created_at) desc`;
+
+/** What the student's screens show of each test: the state they sort by, and the marks of the attempt they handed in. */
+function present(rows: any[]) {
+  // A test that closed before the student joined was never theirs to write, so it is neither missed nor listed.
+  const given = rows.filter((r) => r.attempt_id || !r.closes_at || !r.joined_at || r.closes_at > r.joined_at);
+  return given.map((r) => {
+    const now: Date = r.now;
+    let state: TestState;
+    if (r.attempt_id && !r.submitted_at) state = 'in_progress';
+    else if (r.attempt_id && !r.retake) state = 'done';
+    else if (r.opens_at && now < r.opens_at) state = 'upcoming';
+    else if (r.closes_at && now >= r.closes_at) state = r.attempt_id ? 'done' : 'missed';
+    else state = 'open';
+    return {
+      id: r.id,
+      course_id: r.course_id,
+      title: r.title,
+      class_level: r.class_level,
+      time_limit_min: r.time_limit_min,
+      opens_at: r.opens_at,
+      closes_at: r.closes_at,
+      question_count: r.question_count,
+      max_marks: r.max_marks,
+      state,
+      retake: r.retake,
+      // Marks show the moment a test is handed in. Apps from 1.4.0 to 1.6.0 still read this, from when they were held back.
+      results_open: true,
+      attempt: r.attempt_id
+        ? { id: r.attempt_id, attempt_no: r.attempt_no, submitted_at: r.submitted_at, deadline_at: r.deadline_at, score: r.score, max_score: r.max_score }
+        : null,
+    };
+  });
+}
+
+/**
+ * Every class test given to this student in this tuition, each with the state the home screen sorts by, and how
+ * many courses they are in. A course's tests are not here: they have a page of their own, so a course never
+ * looks like part of the class. A student who is only in courses has no class and so no tests here.
+ */
+studentRoutes.get('/home', async (c) => {
+  const me = c.get('user');
+  const t = tuitionOf(c);
+  await q('select finalize_expired_attempts()');
+  const rows = await tq(
+    t.id,
+    testRows(
+      `(select m.joined_at from memberships m where m.tuition_id = t.tuition_id and m.user_id = $1)`,
+      `t.tuition_id = @T and t.status = 'published' and t.course_id is null and ${ASSIGNED}`,
+    ),
+    [me.id, me.class_level],
+  );
+  const courses = await tq1<{ n: number }>(
+    t.id,
+    'select count(*) as n from course_members cm join courses co on co.id = cm.course_id where cm.student_id = $1 and co.tuition_id = @T',
+    [me.id],
+  );
+  const now = await q1('select now()');
+  // `library` is how many files the student can read: the Library tab shows only when there are some.
+  return c.json({
+    server_now: now.now, tuition: { id: t.id, name: t.name }, tests: present(rows), courses: Number(courses?.n ?? 0),
+    library: await studentFileCount(t.id, me.id, me.class_level),
+  });
+});
+
+/** The courses this student is in, each with how many of its tests they can write now and when the first of them closes. */
+studentRoutes.get('/courses', async (c) => {
+  const me = c.get('user');
+  const t = tuitionOf(c);
+  await q('select finalize_expired_attempts()');
+  const courses = await tq<{ id: string; name: string }>(
+    t.id,
+    `select co.id, co.name from course_members cm join courses co on co.id = cm.course_id
+      where cm.student_id = $1 and co.tuition_id = @T order by co.name`,
+    [me.id],
+  );
+  const rows = await tq(
+    t.id,
+    testRows(
+      `(select cm.added_at from course_members cm where cm.course_id = t.course_id and cm.student_id = $1)`,
+      `t.tuition_id = @T and t.status = 'published' and t.course_id in (select course_id from course_members where student_id = $1)`,
+    ),
+    [me.id],
+  );
+  const tests = present(rows);
+  return c.json({
+    courses: courses.map((co) => {
+      const open = tests.filter((x) => x.course_id === co.id && (x.state === 'open' || x.state === 'in_progress'));
+      const closing = open.map((x) => x.closes_at as Date | null).filter((d): d is Date => d != null).sort((a, b) => a.getTime() - b.getTime());
+      return { id: co.id, name: co.name, open: open.length, closes_at: closing[0] ?? null };
+    }),
+  });
+});
+
+/** One course the student is in, with its tests as the home screen lists a class's. */
+studentRoutes.get('/courses/:id', async (c) => {
+  const me = c.get('user');
+  const t = tuitionOf(c);
+  const id = uuid(c.req.param('id'), 'course id');
+  const course = await tq1<{ id: string; name: string }>(
+    t.id,
+    `select co.id, co.name from course_members cm join courses co on co.id = cm.course_id
+      where cm.student_id = $1 and co.id = $2 and co.tuition_id = @T`,
+    [me.id, id],
+  );
+  if (!course) throw notFound('This course');
+  await q('select finalize_expired_attempts()');
+  const rows = await tq(
+    t.id,
+    testRows(
+      `(select cm.added_at from course_members cm where cm.course_id = t.course_id and cm.student_id = $1)`,
+      `t.tuition_id = @T and t.status = 'published' and t.course_id = $2`,
+    ),
+    [me.id, id],
+  );
+  const now = await q1('select now()');
+  return c.json({ server_now: now.now, course, tests: present(rows) });
+});
+
+studentRoutes.post('/tests/:id/start', async (c) => {
+  const me = c.get('user');
+  const testId = uuid(c.req.param('id'), 'test id');
+  // An app that is too old, let through only to finish a test it had started, may take that test up again but never begin another.
+  if (c.get('oldApp') && !(await isWriting(me.id, testId))) throw updateRequired();
+  return c.json(await startOrResume(me, testId, tuitionOf(c).id, knowsMoreOptions(c)));
+});
+
+studentRoutes.put('/attempts/:id/answers', async (c) => {
+  const b = await readBody(c);
+  return c.json(await saveAnswers(c.get('user').id, uuid(c.req.param('id'), 'attempt id'), b.answers));
+});
+
+studentRoutes.post('/attempts/:id/submit', async (c) => {
+  const b = await readBody(c);
+  return c.json(await submitAttempt(c.get('user').id, uuid(c.req.param('id'), 'attempt id'), b.answers, b.auto === true));
+});
+
+studentRoutes.get('/attempts/:id/result', async (c) => {
+  return c.json(await resultPayload(uuid(c.req.param('id'), 'attempt id'), { studentId: c.get('user').id }));
+});
+
+studentRoutes.get('/results', async (c) => {
+  const T = tuitionOf(c).id;
+  const rows = await tq(
+    T,
+    `select a.id, a.test_id, t.title, t.closes_at, a.attempt_no, a.started_at, a.submitted_at, a.auto_submitted,
+            true as results_open, a.score, a.max_score, a.correct_count, a.wrong_count, a.skipped_count
+       from attempts a join tests t on t.id = a.test_id
+      where a.student_id = $1 and t.tuition_id = @T and t.course_id is null and a.submitted_at is not null
+      order by a.submitted_at desc`,
+    [c.get('user').id],
+  );
+  return c.json({ results: rows });
+});

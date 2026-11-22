@@ -1,0 +1,549 @@
+import 'dart:math';
+
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../core/api.dart';
+import '../../core/changes.dart';
+import '../../core/format.dart' as f;
+import '../../theme.dart';
+import '../../ui/kit.dart';
+import 'common.dart';
+import 'subjects.dart';
+import '../../core/levels.dart';
+
+/// A new login's PIN: four random digits.
+String randomPin() => Random.secure().nextInt(10000).toString().padLeft(4, '0');
+
+/// "Harini Venkatesh" -> "harini.v": the login to suggest on the phone while the server works out the final one.
+/// A name in Tamil or Hindi has no suggestion here, the server spells it in English letters.
+String usernameGuess(String name) {
+  final parts = name.toLowerCase().replaceAll(RegExp(r'[^a-z\s]'), '').trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
+  return parts.isEmpty ? '' : (parts.length == 1 ? parts.first : '${parts.first}.${parts.last[0]}');
+}
+
+// ---------------------------------------------------------------- add
+
+class AddStudentScreen extends StatefulWidget {
+  /// From a group's page: its class and subject are already chosen.
+  const AddStudentScreen({super.key, this.classLevel, this.subjectId});
+  final int? classLevel;
+  final String? subjectId;
+
+  @override
+  State<AddStudentScreen> createState() => _AddStudentScreenState();
+}
+
+class _AddStudentScreenState extends State<AddStudentScreen> {
+  final _name = TextEditingController();
+  final _username = TextEditingController();
+  bool _usernameEdited = false;
+  int? _class;
+  List<Subject> _subjects = [];
+  Set<String> _subjectIds = {};
+  String _pin = randomPin();
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _class = widget.classLevel;
+    _loadSubjects();
+  }
+
+  Future<void> _loadSubjects() async {
+    try {
+      final subjects = await loadSubjects();
+      if (mounted) {
+        setState(() {
+          _subjects = subjects;
+          // The group's subject; otherwise most students take maths.
+          _subjectIds = widget.subjectId != null ? {widget.subjectId!} : {for (final x in subjects) if (x.isDefault) x.id};
+        });
+      }
+    } on ApiException catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _username.dispose();
+    super.dispose();
+  }
+
+  int _suggestSeq = 0;
+
+  /// "Harini Venkatesh" -> "harini.v", and "harini.v.2" for a second one: the server knows which are taken, so it
+  /// has the last word a moment after the typing stops. The tutor never has to think of a login.
+  void _suggest(String name) {
+    if (_usernameEdited) return;
+    _username.text = usernameGuess(name);
+    setState(() {});
+    final seq = ++_suggestSeq;
+    if (name.trim().isEmpty) return;
+    Future<void>.delayed(const Duration(milliseconds: 350), () async {
+      if (!mounted || seq != _suggestSeq || _usernameEdited) return;
+      try {
+        final r = await api.get('/teacher/username-suggestion?name=${Uri.encodeQueryComponent(name.trim())}');
+        if (mounted && seq == _suggestSeq && !_usernameEdited) setState(() => _username.text = '${r['username']}');
+      } on ApiException {
+        // Keep the suggestion made on the phone; the server also fixes a taken one when the login is created.
+      }
+    });
+  }
+
+  String? get _missing {
+    if (_name.text.trim().isEmpty) return 'Type the student\'s name.';
+    if (_class == null) return 'Choose a class.';
+    if (_subjectIds.isEmpty) return 'Choose at least one subject.';
+    if (!RegExp(r'^[a-z0-9._]{3,24}$').hasMatch(_username.text.trim())) return 'Usernames need 3 to 24 lowercase letters, numbers or dots.';
+    return null;
+  }
+
+  Future<void> _create() async {
+    setState(() => _busy = true);
+    try {
+      final r = await api.post('/teacher/students', {
+        'display_name': _name.text.trim(),
+        'class_level': _class,
+        'username': _username.text.trim(),
+        'pin': _pin,
+        'subject_ids': _subjectIds.toList(),
+      });
+      if (!mounted) return;
+      final login = r['login'] as Map<String, dynamic>;
+      await showLoginCard(context, name: _name.text.trim(), username: '${login['username']}', pin: '${login['pin']}');
+      if (mounted) context.pop();
+    } on ApiException catch (e) {
+      if (mounted) showProblem(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final missing = _missing;
+    return PushedPanel(
+      kicker: 'New student',
+      title: 'Add student',
+      footer: PrimaryButton(
+        'Create login',
+        busy: _busy,
+        onTap: missing == null ? _create : null,
+        disabledReason: _busy ? null : missing,
+      ),
+      children: [
+        const SizedBox(height: 22),
+        GroupedInputs(children: [
+          BareField(
+            controller: _name,
+            placeholder: 'Full name',
+            maxLength: 60,
+            capitalization: TextCapitalization.words,
+            action: TextInputAction.done,
+            onChanged: _suggest,
+          ),
+        ]),
+        const FormLabel('Class'),
+        ClassField(value: _class, onChanged: (c) => setState(() => _class = c)),
+        const FormLabel('Subjects'),
+        SubjectToggles(subjects: _subjects, value: _subjectIds, onChanged: (v) => setState(() => _subjectIds = v)),
+        if (_class != null && _subjectIds.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          Fig('Joins ${[for (final x in _subjects) if (_subjectIds.contains(x.id)) groupName(_class!, x.name)].join(' and ')}.', style: labelStyle),
+        ],
+        const FormLabel('Login'),
+        GroupedInputs(children: [
+          BareField(
+            controller: _username,
+            placeholder: 'Username',
+            maxLength: 24,
+            keyboard: TextInputType.visiblePassword,
+            onChanged: (_) => setState(() => _usernameEdited = true),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        Surface(
+          shadow: e1,
+          padding: const EdgeInsets.fromLTRB(17, 12, 10, 12),
+          child: Row(children: [
+            Text('PIN', style: bodyStyle.copyWith(color: muted)),
+            const Spacer(),
+            Text(_pin, style: numStyle(size: 22, weight: FontWeight.w600).copyWith(letterSpacing: 5)),
+            const SizedBox(width: 10),
+            CircleBtn(icon: Ph.arrowsClockwise, label: 'New PIN', ground: fill, onTap: () => setState(() => _pin = randomPin())),
+          ]),
+        ),
+      ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------- detail
+
+class StudentDetailScreen extends StatefulWidget {
+  const StudentDetailScreen({super.key, required this.id, this.courseId, this.courseName});
+  final String id;
+
+  /// Opened from a course's page: the person is shown as that course sees them (its tests only), and can be
+  /// taken out of it.
+  final String? courseId;
+  final String? courseName;
+
+  @override
+  State<StudentDetailScreen> createState() => _StudentDetailScreenState();
+}
+
+class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsBindingObserver, AutoRefresh<StudentDetailScreen> {
+  @override
+  Set<Area> get refreshAreas => {Area.students, Area.tests};
+
+  @override
+  Future<void> refreshQuietly() => _load();
+
+  Map<String, dynamic>? _d;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    markLoaded();
+    try {
+      final d = await api.get('/teacher/students/${widget.id}${widget.courseId == null ? '' : '?course=${widget.courseId}'}');
+      if (mounted) {
+        setState(() {
+        _d = Map<String, dynamic>.from(d);
+        _error = null;
+      });
+      }
+    } on ApiException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    }
+  }
+
+  Future<void> _resetPin(Map<String, dynamic> s) async {
+    final ok = await confirmCard(
+      context,
+      title: 'Reset the PIN?',
+      body: '${s['display_name']} will be logged out and will need the new PIN.',
+      confirm: 'Reset PIN',
+    );
+    if (!ok) return;
+    try {
+      final r = await api.post('/teacher/students/${widget.id}/reset-pin', {});
+      if (!mounted) return;
+      await showLoginCard(context, name: '${s['display_name']}', username: '${r['login']['username']}', pin: '${r['login']['pin']}');
+    } on ApiException catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
+  Future<void> _editSubjects(Map<String, dynamic> s) async {
+    final List<Subject> subjects;
+    try {
+      subjects = await loadSubjects();
+    } on ApiException catch (e) {
+      if (mounted) showProblem(context, e);
+      return;
+    }
+    if (!mounted) return;
+    var chosen = {for (final x in (s['subjects'] as List? ?? const [])) '${(x as Map)['id']}'};
+    final result = await showCentredCard<Set<String>>(
+      context,
+      title: 'Subjects',
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setCard) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Fig('${s['display_name']} gets the tests of each group they are in.', style: bodyStyle.copyWith(color: muted)),
+          const SizedBox(height: 14),
+          SubjectToggles(subjects: subjects, value: chosen, onChanged: (v) => setCard(() => chosen = v)),
+          const SizedBox(height: 18),
+          PrimaryButton(
+            'Save',
+            onTap: chosen.isEmpty ? null : () => Navigator.of(ctx).pop(chosen),
+            disabledReason: chosen.isEmpty ? 'Choose at least one subject.' : null,
+          ),
+        ]),
+      ),
+    );
+    if (result == null) return;
+    try {
+      await api.patch('/teacher/students/${widget.id}', {'subject_ids': result.toList()});
+      _load();
+    } on ApiException catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
+  Future<void> _toggleActive(Map<String, dynamic> s) async {
+    final active = s['active'] == true;
+    final ok = await confirmCard(
+      context,
+      title: active ? 'Turn off this login?' : 'Turn this login back on?',
+      body: active
+          ? '${s['display_name']} will be logged out and cannot log in until you turn it back on. Their results are kept.'
+          : '${s['display_name']} will be able to log in again with the same PIN.',
+      confirm: active ? 'Turn off' : 'Turn on',
+      destructive: active,
+    );
+    if (!ok) return;
+    try {
+      await api.post('/teacher/students/${widget.id}/active', {'active': !active});
+      _load();
+    } on ApiException catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
+  /// Takes the person out of the course this page was opened from. They stay a student with their login and any groups they are in.
+  Future<void> _leaveCourse(Map<String, dynamic> s) async {
+    final course = widget.courseName ?? 'this course';
+    final ok = await confirmCard(
+      context,
+      title: 'Remove ${s['display_name']} from $course?',
+      body: 'They stay a student with their login and any groups they are in. What they wrote in the course stays in its results.',
+      confirm: 'Remove',
+      destructive: true,
+    );
+    if (!ok) return;
+    try {
+      await api.delete('/teacher/courses/${widget.courseId}/people/${widget.id}');
+      if (mounted) context.pop(true);
+    } on ApiException catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
+  Future<void> _delete(Map<String, dynamic> s, int written) async {
+    final inCourses = (s['courses'] as List? ?? const []).length;
+    final ok = await confirmCard(
+      context,
+      title: 'Delete ${s['display_name']}?',
+      body: [
+        'Their login${written > 0 ? ' and ${written == 1 ? 'their 1 test result' : 'all $written test results'}' : ''} will be deleted for good.',
+        if (inCourses > 0) 'They are taken out of ${f.count(inCourses, 'course')} too.',
+        if (written > 0) 'To keep the results, turn the login off instead.',
+      ].join(' '),
+      confirm: 'Delete',
+      destructive: true,
+    );
+    if (!ok) return;
+    try {
+      await api.delete('/teacher/students/${widget.id}');
+      if (mounted) context.pop(true);
+    } on ApiException catch (e) {
+      if (mounted) showProblem(context, e);
+    }
+  }
+
+  /// The student's actions, kept off the page: change subjects, reset the PIN, turn the login off, delete.
+  Future<void> _menu(Map<String, dynamic> s, int written) async {
+    final active = s['active'] == true;
+    final inCourses = (s['courses'] as List? ?? const []).length;
+    final pick = await showCentredCard<String>(
+      context,
+      title: '${s['display_name']}',
+      subtitle: 'Login ${s['username']}${inCourses > 0 ? ' · in ${f.count(inCourses, 'course')}' : ''}',
+      builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        if (widget.courseId != null) _MenuRow(icon: Ph.userMinus, label: 'Remove from this course', onTap: () => Navigator.of(ctx).pop('leave')),
+        // Subjects decide a person's groups: someone with no class (only in courses) has none to change.
+        if (s['class_level'] != null) _MenuRow(icon: Ph.pencilSimple, label: 'Change subjects', onTap: () => Navigator.of(ctx).pop('subjects')),
+        _MenuRow(icon: Ph.key, label: 'Reset PIN', onTap: () => Navigator.of(ctx).pop('pin')),
+        _MenuRow(
+          icon: active ? Ph.prohibit : Ph.checkCircle,
+          label: active ? 'Turn off login' : 'Turn on login',
+          onTap: () => Navigator.of(ctx).pop('active'),
+        ),
+        _MenuRow(icon: Ph.trash, label: 'Delete student', destructive: true, last: true, onTap: () => Navigator.of(ctx).pop('delete')),
+      ]),
+    );
+    if (!mounted) return;
+    switch (pick) {
+      case 'leave':
+        await _leaveCourse(s);
+      case 'subjects':
+        await _editSubjects(s);
+      case 'pin':
+        await _resetPin(s);
+      case 'active':
+        await _toggleActive(s);
+      case 'delete':
+        await _delete(s, written);
+    }
+  }
+
+  bool _allChapters = false;
+  bool _allTests = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final d = _d;
+    if (d == null) {
+      return PushedPanel(title: 'Student', children: [
+        if (_error != null) ErrorState(message: _error!, onRetry: _load) else const LoadingState(rows: 3),
+      ]);
+    }
+    final s = Map<String, dynamic>.from(d['student']);
+    final attempts = (d['attempts'] as List).cast<Map<String, dynamic>>();
+    final done = attempts.where((a) => a['submitted_at'] != null).toList();
+    final chapters = (d['chapters'] as List).cast<Map<String, dynamic>>();
+    final missed = (d['missed'] as List).cast<Map<String, dynamic>>();
+    final avg = done.isEmpty
+        ? null
+        : done.map((a) => (a['score'] as num) / max((a['max_score'] as num), 1)).reduce((x, y) => x + y) / done.length;
+    final lastSeen = f.parseTime(s['last_seen_at']);
+    final subjects = subjectNames(s['subjects']);
+
+    // Weakest chapters first: that is where the tutor can help. A chapter the student has down is not a weakness.
+    double ratio(Map<String, dynamic> c) => (c['correct'] as int) / max(c['total'] as int, 1);
+    final byWeakness = [...chapters]..sort((a, b) => ratio(a).compareTo(ratio(b)));
+    final weak = byWeakness.where((c) => ratio(c) < 0.8).take(3).toList();
+    final chaptersShown = _allChapters ? byWeakness : weak;
+
+    // Written and missed tests in one list, newest first.
+    final items = <(DateTime, Widget)>[
+      for (final a in attempts)
+        (
+          f.parseTime(a['submitted_at'] ?? a['started_at']) ?? DateTime.now(),
+          RowTile(
+            title: '${a['title']}${(a['attempt_no'] as int) > 1 ? ' (retake)' : ''}',
+            meta: a['submitted_at'] == null
+                ? 'Writing now'
+                : 'Handed in ${f.when(f.parseTime(a['submitted_at'])!)}'
+                    ' · ${f.duration(f.parseTime(a['submitted_at'])!.difference(f.parseTime(a['started_at'])!).inSeconds)}',
+            trailing: a['submitted_at'] == null
+                ? const TagChip('Writing', tone: Tone.warning)
+                : Text('${f.marks(a['score'])}/${f.marks(a['max_score'])}', style: numStyle(size: 15)),
+            chevron: a['submitted_at'] != null,
+            onTap: a['submitted_at'] == null ? null : () => context.push('/t/attempts/${a['id']}'),
+          ),
+        ),
+      for (final m in missed)
+        (
+          f.parseTime(m['closes_at']) ?? DateTime.now(),
+          RowTile(title: '${m['title']}', meta: 'Closed ${f.whenDate(f.parseTime(m['closes_at'])!)}', trailing: const TagChip('Missed', tone: Tone.danger)),
+        ),
+    ]..sort((a, b) => b.$1.compareTo(a.$1));
+    final testsShown = _allTests ? items : items.take(6).toList();
+
+    Widget toggle(String label, VoidCallback onTap) => Pressable(
+          label: label,
+          onTap: onTap,
+          child: Text(label, style: chipStyle.copyWith(color: muted, fontWeight: FontWeight.w600)),
+        );
+
+    return PushedPanel(
+      onRefresh: _load,
+      kicker: widget.courseId != null
+          ? ['Course', if (widget.courseName != null && widget.courseName!.isNotEmpty) widget.courseName!, if (s['active'] != true) 'login off'].join(' · ')
+          : [className(s['class_level']), ...subjects, if (s['active'] != true) 'login off'].where((p) => p.isNotEmpty).join(' · '),
+      title: '${s['display_name']}',
+      headerTrailing: CircleBtn(icon: Ph.dotsThreeVertical, label: 'More', onTap: () => _menu(s, done.length)),
+      children: [
+        const SizedBox(height: 22),
+        Reveal(
+          child: MeasurementCard(
+            label: 'Average marks',
+            value: avg == null ? '-' : '${(avg * 100).round()}',
+            countTo: avg == null ? null : (avg * 100).round(),
+            unit: avg == null ? null : '%',
+            fraction: avg,
+            note: '${f.count(done.length, 'test')} written · ${missed.length} missed'
+                '${lastSeen == null ? '' : ' · last seen ${f.relative(lastSeen)}'}',
+          ),
+        ),
+        if (chapters.isNotEmpty) ...[
+          SectionRule(
+            _allChapters ? 'Chapters' : 'Weakest chapters',
+            padding: const EdgeInsets.fromLTRB(0, 26, 0, 11),
+            trailing: chapters.length > weak.length ? toggle(_allChapters ? 'Show fewer' : 'All ${chapters.length}', () => setState(() => _allChapters = !_allChapters)) : null,
+          ),
+          if (chaptersShown.isEmpty)
+            Text('None below 80%.', style: bodyStyle.copyWith(color: muted))
+          else
+          AnimatedSize( // motion: approved
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: Surface(
+              shadow: e1,
+              padding: const EdgeInsets.fromLTRB(17, 6, 17, 6),
+              child: Column(children: [
+                for (final c in chaptersShown)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: Row(children: [
+                      Expanded(flex: 5, child: Text('${c['chapter']}', style: rowTitleStyle, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                      const SizedBox(width: 12),
+                      Expanded(flex: 4, child: Track(ratio(c), height: 6)),
+                      const SizedBox(width: 12),
+                      SizedBox(width: 46, child: Text(f.percent(ratio(c)), style: numStyle(size: 13), textAlign: TextAlign.right)),
+                    ]),
+                  ),
+              ]),
+            ),
+          ),
+        ],
+        SectionRule(
+          'Tests',
+          count: items.length,
+          padding: const EdgeInsets.fromLTRB(0, 26, 0, 11),
+          trailing: items.length > 6 ? toggle(_allTests ? 'Show fewer' : 'All ${items.length}', () => setState(() => _allTests = !_allTests)) : null,
+        ),
+        if (items.isEmpty)
+          Text('No tests yet.', style: bodyStyle.copyWith(color: muted))
+        else
+          for (final (i, it) in testsShown.indexed) ...[if (i > 0) const SizedBox(height: gapRow), it.$2],
+        const SectionRule('Login', padding: EdgeInsets.fromLTRB(0, 26, 0, 11)),
+        Surface(
+          shadow: e1,
+          padding: const EdgeInsets.fromLTRB(17, 10, 8, 10),
+          child: Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('Username', style: labelStyle),
+                const SizedBox(height: 3),
+                Text('${s['username']}', style: numStyle(size: 15, weight: FontWeight.w600)),
+              ]),
+            ),
+            TextAction('Reset PIN', color: ink, onTap: () => _resetPin(s)),
+          ]),
+        ),
+      ],
+    );
+  }
+}
+
+/// One action in the student's menu card.
+class _MenuRow extends StatelessWidget {
+  const _MenuRow({required this.icon, required this.label, required this.onTap, this.destructive = false, this.last = false});
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool destructive;
+  final bool last;
+
+  @override
+  Widget build(BuildContext context) {
+    final tint = destructive ? danger : ink;
+    return Pressable(
+      label: label,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(4, 14, 4, 14),
+        decoration: last ? null : BoxDecoration(border: Border(bottom: BorderSide(color: hairline))),
+        child: Row(children: [
+          Icon(icon, size: 20, color: destructive ? danger : muted),
+          const SizedBox(width: 14),
+          Expanded(child: Text(label, style: rowTitleStyle.copyWith(color: tint))),
+        ]),
+      ),
+    );
+  }
+}

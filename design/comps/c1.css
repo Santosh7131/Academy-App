@@ -1,0 +1,87 @@
+/* Comps for Courses (2026-10-26). Builds on tokens.css + comp.css + v12.css + v14.css + w1.css.
+   Sample data only: every name, number and time on these screens is made up. */
+
+/* ---- tab header with one round action (Courses, Groups) */
+.th{padding-top:14px}
+.th .trow{display:flex;align-items:flex-end;gap:10px;margin-top:7px}
+.th .trow .display{flex:1;min-width:0}
+.th .trow .circ{margin-bottom:4px}
+
+/* ---- the kind label a course carries */
+.tag.kind{gap:4px;padding:0 9px 0 7px;flex:none}
+.tag.kind i{font-size:12px}
+
+/* ---- Home: a group or a course with a test running */
+.sumline{padding:14px 20px 0;font-size:13.8px;font-weight:500;letter-spacing:-.022em;color:var(--muted)}
+.gcards{display:flex;flex-direction:column;gap:10px;margin-top:18px}
+.gcard{background:var(--surface);border-radius:20px;box-shadow:var(--e1);padding:15px 17px 6px}
+:root[data-theme="dark"] .gcard{border:1px solid var(--hair)}
+.gcard .gh{display:flex;align-items:center;gap:10px}
+.gcard .gh .nm{font-size:20px;font-weight:700;letter-spacing:-.03em;color:var(--ink);line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gcard .sub{display:flex;align-items:center;gap:8px;margin-top:5px}
+.gcard .sub .meta{margin-top:0}
+.gcard .blk{margin-top:14px}
+.gcard .blk .hl{height:1px;background:var(--hair);margin-top:8px}
+.gcard .mini{display:flex;align-items:center;gap:12px;padding:11px 0}
+.gcard .mini .t{font-size:14.5px;font-weight:600;letter-spacing:-.026em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tr2{text-align:right;flex:none}
+.tr2 .num{font-size:15px;font-weight:700;letter-spacing:-.04em;color:var(--ink)}
+.tr2 .meta{margin-top:2px}
+.tr2 .meta.wn{color:var(--wn)}
+
+/* the groups and courses with nothing running: one short list */
+.ql{background:var(--surface);border-radius:20px;box-shadow:var(--e1);padding:0 17px}
+:root[data-theme="dark"] .ql{border:1px solid var(--hair)}
+.ql .qg{display:flex;align-items:center;gap:10px;padding:14px 0}
+.ql .qg + .qg{border-top:1px solid var(--hair)}
+.ql .qg .nm{flex:1;min-width:0;font-size:14.5px;font-weight:600;letter-spacing:-.026em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ql .qg .ct{font-size:11.5px;font-weight:600;color:var(--muted);flex:none}
+
+/* ---- empty state, as the app draws it */
+.empty{display:flex;flex-direction:column;align-items:center;text-align:center;padding:64px 32px 0}
+.empty .ic{width:76px;height:76px;border-radius:999px;background:var(--surface);box-shadow:var(--e2);display:grid;place-items:center;font-size:30px;color:var(--faint)}
+:root[data-theme="dark"] .empty .ic{border:1px solid var(--hair)}
+.empty .et{margin-top:18px;font-size:19px;font-weight:700;letter-spacing:-.034em;color:var(--ink)}
+.empty .eb{margin-top:6px;font-size:13.8px;font-weight:500;letter-spacing:-.022em;line-height:1.54;color:var(--muted)}
+.empty .btn{margin-top:22px;width:auto;height:50px;padding:0 24px;display:inline-flex}
+
+/* ---- a course page */
+.btn.soft.dg{color:var(--od)}
+.textact.danger{color:var(--od)}
+.center{display:flex;justify-content:center}
+
+/* ---- adding people */
+.pick{display:flex;align-items:center;gap:13px;padding:12px 17px;background:var(--surface);border-radius:20px;box-shadow:var(--e1)}
+:root[data-theme="dark"] .pick{border:1px solid var(--hair)}
+.pick .ck{width:24px;height:24px;border-radius:999px;border:1.8px solid #DEDEE6;flex:none;display:grid;place-items:center;font-size:13px;color:transparent}
+:root[data-theme="dark"] .pick .ck{border-color:#3A3A44}
+.pick.on .ck{background:var(--action);border-color:var(--action);color:var(--action-ink)}
+.pick.in .ck{border-color:transparent;background:var(--sunk);color:var(--muted)}
+.pick.in .rowt{color:var(--muted)}
+.pick .rowt{font-size:14.5px}
+.pickbar{display:flex;align-items:center;justify-content:space-between;margin-top:12px}
+.pinrow{display:flex;align-items:center;gap:10px;padding:10px 10px 10px 17px;background:var(--surface);border-radius:20px;box-shadow:var(--e1)}
+:root[data-theme="dark"] .pinrow{border:1px solid var(--hair)}
+.pinrow .lbl{font-size:13.8px;font-weight:500;color:var(--muted);flex:1}
+.pinrow .pin{font-family:var(--mono);font-size:22px;font-weight:600;letter-spacing:5px;color:var(--ink)}
+.stack{display:flex;flex-direction:column;gap:10px}
+.info{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;border-radius:18px;background:var(--sunk);font-size:12.5px;font-weight:500;letter-spacing:-.012em;line-height:1.5;color:var(--body)}
+.info > i{font-size:20px;color:var(--muted);flex:none;margin-top:1px}
+.info b{font-weight:700;color:var(--ink)}
+
+/* ---- a text field inside a centred card: a ground of its own, so it reads on white */
+.choice .cardfld .fld{background:var(--sunk);box-shadow:none}
+:root[data-theme="dark"] .choice .cardfld .fld{border:0}
+
+/* ---- the confirm card */
+.choice .cbody{padding:0 22px}
+.choice .cbtns{display:flex;gap:10px;padding:20px 18px 6px}
+.choice .cbtns .btn{height:48px;flex:1;box-shadow:none}
+
+/* ---- update needed */
+.upd{display:flex;flex-direction:column;align-items:center;text-align:center;padding:92px 30px 0}
+.upd .ic{width:84px;height:84px;border-radius:999px;background:var(--surface);box-shadow:var(--e2);display:grid;place-items:center;font-size:36px;color:var(--ink)}
+:root[data-theme="dark"] .upd .ic{border:1px solid var(--hair)}
+.ucard{padding:15px 15px 15px 17px}
+.uh{display:flex;gap:14px;align-items:flex-start}
+.uic{width:40px;height:40px;border-radius:999px;background:var(--sunk);display:grid;place-items:center;font-size:21px;color:var(--ink);flex:none}

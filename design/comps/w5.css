@@ -1,0 +1,7 @@
+/* Comps for telling groups and courses apart (2026-11-02).
+   Builds on tokens.css + comp.css + v12.css + v14.css + w1.css + c1.css + w2.css + w3.css + w4.css.
+   Sample data only: every name, number and time on these screens is made up. */
+
+/* ---- two tabs with a longer name: a wider bar */
+.navbar.two.wide{left:44px;right:44px}
+.navbar.two.wide .ni{width:116px}

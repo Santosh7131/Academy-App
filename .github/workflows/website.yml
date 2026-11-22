@@ -1,0 +1,33 @@
+# Publishes website/ to GitHub Pages. It runs only when started by hand (Actions → Website → Run workflow), so the
+# site goes public when it is ready: the download link points at a real release, the contact email is in, and the
+# privacy policy and terms have had their legal check (website/README.md lists what is open). Before the first run,
+# set Settings → Pages → Build and deployment → Source to "GitHub Actions".
+name: Website
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; one already running is left to finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: website
+      - id: deployment
+        uses: actions/deploy-pages@v5

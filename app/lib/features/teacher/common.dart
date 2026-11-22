@@ -1,0 +1,375 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
+
+import '../../core/api.dart';
+import '../../core/format.dart' as f;
+import '../../core/levels.dart';
+import '../../core/session.dart';
+import '../../theme.dart';
+import '../../ui/kit.dart';
+import '../../ui/time_wheels.dart';
+
+/// Every test has a closing time, so a new one starts with the next 9:00 pm that is at least
+/// three hours away.
+DateTime defaultClosing() {
+  final now = DateTime.now();
+  var t = DateTime(now.year, now.month, now.day, 21);
+  if (t.difference(now) < const Duration(hours: 3)) t = t.add(const Duration(days: 1));
+  return t;
+}
+
+/// Header for a teacher tab: kicker, one display line, trailing actions.
+class TabHeader extends StatelessWidget {
+  const TabHeader({super.key, required this.kicker, required this.title, this.actions = const [], this.titleLines = 1});
+  final String kicker;
+  final String title;
+  final List<Widget> actions;
+
+  /// How many lines the title may take: a longer title wraps between words instead of being cut short.
+  final int titleLines;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.fromLTRB(gutter, 22, gutter, 0),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Kicker(kicker),
+              const SizedBox(height: 6),
+              // A very large text size would break a long title in the middle of a word, so the title grows to 1.4 times at most.
+              MediaQuery.withClampedTextScaling(maxScaleFactor: 1.4, child: Fig(title, style: displayStyle, maxLines: titleLines)),
+            ]),
+          ),
+          for (final (i, a) in actions.indexed) ...[if (i > 0) const SizedBox(width: 10), a],
+        ]),
+      );
+}
+
+/// A short group of segmented chips that wraps onto the next line instead of scrolling
+/// sideways. Long lists (classes, subjects, chapters, days) use a select instead.
+class ChipRow extends StatelessWidget {
+  const ChipRow({super.key, required this.children, this.padding = const EdgeInsets.symmetric(horizontal: gutter)});
+  final List<Widget> children;
+  final EdgeInsets padding;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: padding,
+        child: Align(alignment: Alignment.centerLeft, child: Wrap(spacing: 8, runSpacing: 8, children: children)),
+      );
+}
+
+/// Asks a tutor for the name of a class their tuition teaches that is not Class 1 to 12 ("LKG", "NEET 2027").
+Future<String?> askLevelName(BuildContext context) {
+  final c = TextEditingController();
+  return showCentredCard<String>(
+    context,
+    title: 'Name a class',
+    subtitle: 'For anything that is not Class 1 to 12, such as LKG or NEET 2027.',
+    builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      GroupedInputs(children: [
+        BareField(
+          controller: c,
+          placeholder: 'Class name, e.g. NEET 2027',
+          autofocus: true,
+          capitalization: TextCapitalization.words,
+          onSubmitted: (v) => Navigator.of(ctx).pop(v),
+        ),
+      ]),
+      const SizedBox(height: 16),
+      PrimaryButton('Add this class', onTap: () => Navigator.of(ctx).pop(c.text)),
+    ]),
+  );
+}
+
+/// Names a class for the tuition on screen, on the server, and loads the tuition's list again.
+Future<Level?> addLevelOnline(BuildContext context, String name) async {
+  try {
+    final r = await api.post('/teacher/levels', {'label': name});
+    await session.refreshTuitions();
+    final l = Map<String, dynamic>.from(r['level'] as Map);
+    return Level((l['code'] as num).toInt(), '${l['label']}', custom: true);
+  } on ApiException catch (e) {
+    if (context.mounted) showProblem(context, e);
+    return null;
+  }
+}
+
+const _nameAnother = -1;
+
+/// The class chooser. In a form a tutor can also name a class of their own ("LKG", "NEET 2027"):
+/// [onAdd] makes it (on the server by default) and returns it.
+Future<Choice<int>?> _pickClass(BuildContext context, int? value,
+    {required bool allowAll, bool allowNew = false, Map<int, String> extra = const {}, Future<Level?> Function(String name)? onAdd}) async {
+  final c = await showChoices<int>(
+    context,
+    title: 'Class',
+    options: [
+      if (allowAll) const Choice(null, 'All classes'),
+      for (final l in levelsFor(extra: extra)) Choice(l.code, l.label),
+      if (allowNew && session.isTeacher) const Choice(_nameAnother, 'Name another class'),
+    ],
+    selected: value,
+  );
+  if (c?.value != _nameAnother) return c;
+  if (!context.mounted) return null;
+  final name = (await askLevelName(context))?.trim();
+  if (name == null || name.isEmpty || !context.mounted) return null;
+  final made = await (onAdd ?? (n) => addLevelOnline(context, n))(name);
+  return made == null ? null : Choice(made.code, made.label);
+}
+
+/// The class as a filter pill: "All classes" or "Class 9".
+class ClassFilter extends StatelessWidget {
+  const ClassFilter({super.key, required this.value, required this.onChanged, this.allowAll = true});
+  final int? value;
+  final ValueChanged<int?> onChanged;
+  final bool allowAll;
+
+  @override
+  Widget build(BuildContext context) => SelectPill(
+        label: value == null ? 'All classes' : className(value),
+        active: value != null,
+        onTap: () async {
+          final c = await _pickClass(context, value, allowAll: allowAll);
+          if (c != null) onChanged(c.value);
+        },
+      );
+}
+
+/// The class in a form. A tutor can name a class of their own from here.
+class ClassField extends StatelessWidget {
+  const ClassField({super.key, required this.value, required this.onChanged, this.enabled = true, this.extra = const {}, this.onAdd});
+  final int? value;
+  final ValueChanged<int> onChanged;
+  final bool enabled;
+
+  /// Class names a new tuition has typed that the server does not know yet (first-run setup).
+  final Map<int, String> extra;
+
+  /// How a class of the tutor's own is made: on the server by default; the setup screen keeps them until the tuition exists.
+  final Future<Level?> Function(String name)? onAdd;
+
+  @override
+  Widget build(BuildContext context) => SelectField(
+        value: value == null ? null : className(value, extra: extra),
+        placeholder: 'Choose a class',
+        onTap: !enabled
+            ? null
+            : () async {
+                final c = await _pickClass(context, value, allowAll: false, allowNew: true, extra: extra, onAdd: onAdd);
+                if (c?.value != null) onChanged(c!.value!);
+              },
+      );
+}
+
+/// A chapter row from the API: {id, name, questions?}.
+typedef ChapterRow = Map<String, dynamic>;
+
+/// The chapter as a filter pill, for a class and subject that are already chosen.
+class ChapterFilter extends StatelessWidget {
+  const ChapterFilter({super.key, required this.chapters, required this.value, required this.onChanged, this.subtitle});
+  final List<ChapterRow> chapters;
+  final String? value;
+  final ValueChanged<String?> onChanged;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    final current = chapters.where((c) => c['id'] == value).map((c) => '${c['name']}').firstOrNull;
+    return SelectPill(
+      label: current ?? 'All chapters',
+      active: current != null,
+      onTap: () async {
+        final c = await showChoices<String>(
+          context,
+          title: 'Chapter',
+          subtitle: subtitle,
+          options: [
+            const Choice(null, 'All chapters'),
+            for (final ch in chapters) Choice('${ch['id']}', '${ch['name']}', count: ch['questions'] as int?),
+          ],
+          selected: value,
+        );
+        if (c != null) onChanged(c.value);
+      },
+    );
+  }
+}
+
+/// Label above a form group, small and muted (not a labelled form box).
+class FormLabel extends StatelessWidget {
+  const FormLabel(this.text, {super.key, this.top = 22});
+  final String text;
+  final double top;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: EdgeInsets.only(top: top, bottom: 10),
+        child: Text(text, style: labelStyle),
+      );
+}
+
+/// Picks a day and a time with two selects side by side.
+class DayTimeChooser extends StatelessWidget {
+  const DayTimeChooser({super.key, required this.value, required this.onChanged, this.noneLabel, this.days = 14});
+
+  final DateTime? value;
+  final ValueChanged<DateTime?> onChanged;
+
+  /// When set, a first chip that clears the value ("Now", "No closing time").
+  final String? noneLabel;
+  final int days;
+
+  @override
+  Widget build(BuildContext context) {
+    final today = DateTime.now();
+    final day0 = DateTime(today.year, today.month, today.day);
+    final selDay = value == null ? null : DateTime(value!.year, value!.month, value!.day);
+    final selMinutes = value == null ? null : value!.hour * 60 + value!.minute;
+    // "Today · Thu 29 Oct", "Tomorrow · Fri 30 Oct", then "Sat 31 Oct": every day has its day name and date, so nobody has to work
+    // out which day "tomorrow" is.
+    String dayLabel(int i) => f.dayTitle(day0.add(Duration(days: i)));
+
+    String timeLabel(int m) => f.time(DateTime(2000, 1, 1, m ~/ 60, m % 60));
+
+    void pick({DateTime? dayValue, int? minutes}) {
+      final d = dayValue ?? selDay ?? day0;
+      final m = minutes ?? selMinutes ?? 18 * 60;
+      onChanged(DateTime(d.year, d.month, d.day, m ~/ 60, m % 60));
+    }
+
+    // A value from before the 14-day window still shows as itself. Beside the time a near day takes two short
+    // lines ("Tomorrow" over "Fri 30 Oct"); on a line of its own, and in the list of days, it is one ("Tomorrow · Fri 30 Oct").
+    Widget dayField({required bool oneLine, double? minHeight}) => SelectField(
+          value: selDay == null ? noneLabel : (oneLine ? f.dayTitle(selDay) : f.dayTitle(selDay).replaceFirst(' · ', '\n')),
+          placeholder: 'Day',
+          minHeight: minHeight,
+          onTap: () async {
+            final c = await showChoices<int>(
+              context,
+              title: 'Day',
+              options: [if (noneLabel != null) Choice(-1, noneLabel!), for (var i = 0; i < days; i++) Choice(i, dayLabel(i))],
+              selected: selDay == null ? (noneLabel != null ? -1 : null) : selDay.difference(day0).inDays,
+            );
+            if (c == null) return;
+            if (c.value == -1) {
+              onChanged(null);
+            } else {
+              pick(dayValue: day0.add(Duration(days: c.value!)));
+            }
+          },
+        );
+
+    Widget timeField({double? minHeight}) => SelectField(
+          value: timeLabel(selMinutes!),
+          minHeight: minHeight,
+          // Any time of day, to the minute, on wheels.
+          onTap: () async {
+            final m = await pickTimeOfDay(context, title: 'Time', minutes: selMinutes);
+            if (m != null) pick(minutes: m);
+          },
+        );
+
+    final scaler = MediaQuery.textScalerOf(context);
+    return LayoutBuilder(builder: (context, box) {
+      // Side by side while the longest day ("Wed 30 Sep") fits a half-width box; one above the other when a narrow phone or large text
+      // leaves it no room.
+      if (value != null && box.maxWidth < 170 * scaler.scale(15) / 15 + 126) {
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [dayField(oneLine: true), const SizedBox(height: 10), timeField()]);
+      }
+      // Both boxes are as tall as a two-line day (two lines, the padding, and two pixels for line heights that round up), so the page
+      // does not jump when the day changes between "Tomorrow" and "Sat 31 Oct".
+      final twoLines = value == null ? null : scaler.scale(15 * 1.33) * 2 + 32;
+      return IntrinsicHeight(
+        child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Expanded(child: dayField(oneLine: false, minHeight: twoLines)),
+          if (value != null) ...[const SizedBox(width: 10), Expanded(child: timeField(minHeight: twoLines))],
+        ]),
+      );
+    });
+  }
+}
+
+String loginMessage(String name, String username, String pin) =>
+    '${session.tuitionName} login for $name\n'
+    'Username: $username\n'
+    'PIN: $pin\n'
+    'Open the ${session.tuitionName} app and log in with these.';
+
+/// The login card shown after creating a student or resetting a PIN.
+Future<void> showLoginCard(BuildContext context, {required String name, required String username, required String pin}) {
+  return showCentredCard<void>(
+    context,
+    title: 'Login for ${name.split(' ').first}',
+    builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Surface(
+        shadow: e1,
+        color: fill,
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('Username', style: labelStyle),
+          const SizedBox(height: 4),
+          Text(username, style: numStyle(size: 22, weight: FontWeight.w600)),
+          const SizedBox(height: 14),
+          Text('PIN', style: labelStyle),
+          const SizedBox(height: 4),
+          Text(pin, style: numStyle(size: 30, weight: FontWeight.w700).copyWith(letterSpacing: 6)),
+        ]),
+      ),
+      const SizedBox(height: 18),
+      Row(children: [
+        Expanded(
+          child: SecondaryButton('Copy', icon: Ph.copy, onTap: () {
+            Clipboard.setData(ClipboardData(text: loginMessage(name, username, pin)));
+          }),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: PrimaryButton('Share', icon: Ph.shareNetwork, onTap: () {
+            SharePlus.instance.share(ShareParams(text: loginMessage(name, username, pin)));
+          }),
+        ),
+      ]),
+    ]),
+  );
+}
+
+/// Shows an API problem in a centred card.
+Future<void> showProblem(BuildContext context, Object e) => showCentredCard<void>(
+      context,
+      title: 'That did not work',
+      builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Fig(e is ApiException ? e.message : 'Something went wrong. Please try again.', style: bodyStyle),
+        const SizedBox(height: 18),
+        PrimaryButton('OK', onTap: () => Navigator.of(ctx).pop()),
+      ]),
+    );
+
+/// A read-only fact list inside one surface.
+class FactList extends StatelessWidget {
+  const FactList(this.facts, {super.key});
+  final List<(String, String)> facts;
+
+  @override
+  Widget build(BuildContext context) => Surface(
+        shadow: e1,
+        child: Column(children: [
+          for (final (i, (label, value)) in facts.indexed) ...[
+            if (i > 0) Container(height: 1, margin: const EdgeInsets.only(left: 17), color: hairline),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(17, 14, 17, 14),
+              child: Row(children: [
+                Text(label, style: bodyStyle.copyWith(color: muted)),
+                const SizedBox(width: 16),
+                Expanded(child: Fig(value, style: rowTitleStyle, textAlign: TextAlign.right)),
+              ]),
+            ),
+          ],
+        ]),
+      );
+}
+
+/// Bottom spacing so the last row clears the floating navigation.
+const navClearance = SizedBox(height: 110);

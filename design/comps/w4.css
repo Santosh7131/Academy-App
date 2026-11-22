@@ -1,0 +1,67 @@
+/* Comps for three tabs on a class page, one list with tags on Home and Classes, and the Library (2026-10-31).
+   Builds on tokens.css + comp.css + v12.css + v14.css + w1.css + c1.css + w2.css + w3.css.
+   Sample data only: every name, number and time on these screens is made up. */
+
+/* ---- three tabs: the chosen one is a clear step lighter than the track in dark mode too (the app's #2E2E38) */
+:root[data-theme="dark"] .tabs2 .t.on{background:#2E2E38;border:1px solid var(--hair)}
+.tabs2 .t{min-width:0}
+
+/* ---- tags and small facts on a row */
+.meta.ok{color:var(--ok)}
+.meta.wn{color:var(--wn)}
+.tag.soon{background:var(--sunk);color:var(--ink)}
+.row .tr2.st{min-width:84px}
+
+/* ---- the Library: a titled box per section, files inside */
+.lbox{background:var(--surface);border-radius:20px;box-shadow:var(--e1);overflow:hidden;margin-bottom:12px}
+:root[data-theme="dark"] .lbox{border:1px solid var(--hair)}
+.lbox .lh{display:flex;align-items:center;gap:10px;padding:12px 12px 10px 17px}
+.lbox .lt{flex:1;min-width:0;font-size:17px;font-weight:700;letter-spacing:-.034em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lbox .lc{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--muted);background:var(--sunk);border-radius:999px;padding:3px 9px}
+.lbox .dots{width:32px;height:32px;border-radius:999px;display:grid;place-items:center;color:var(--muted);font-size:18px;background:var(--sunk)}
+.lbox .ladd{display:flex;align-items:center;gap:8px;padding:12px 17px;border-top:1px solid var(--hair);font-size:13.5px;font-weight:700;letter-spacing:-.02em;color:var(--ink)}
+.lbox .ladd i{font-size:18px;color:var(--muted)}
+.frow{display:flex;align-items:center;gap:13px;padding:10px 12px 10px 17px;border-top:1px solid var(--hair)}
+.frow .grow{min-width:0}
+.frow .ft{width:38px;height:46px;border-radius:9px;background:var(--sunk);display:grid;place-items:center;color:var(--muted);font-size:20px;flex:none}
+.frow .ft.photo{background:linear-gradient(140deg,#C7D4E6,#8EA5C6 55%,#6F89B0);color:#fff}
+.frow .fn{font-size:14.5px;font-weight:600;letter-spacing:-.026em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frow .fm{font-size:11.5px;font-weight:600;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.frow .fx{width:34px;height:34px;border-radius:999px;display:grid;place-items:center;color:var(--muted);font-size:19px;flex:none}
+.frow .fx.dl{background:var(--sunk);color:var(--ink)}
+.frow.up .bar{height:5px;border-radius:5px;background:var(--hair);margin-top:8px;overflow:hidden}
+:root[data-theme="dark"] .frow.up .bar{background:#2A2A33}
+.frow.up .bar i{display:block;height:100%;border-radius:5px;background:var(--ink)}
+.frow.fail .fm{color:var(--wn)}
+.frow .again{flex:none;height:32px;padding:0 12px;border-radius:999px;background:var(--sunk);display:inline-flex;align-items:center;font-size:12.5px;font-weight:700;letter-spacing:-.02em;color:var(--ink)}
+.fnote2{display:flex;align-items:center;gap:8px;margin-top:2px;font-size:11.5px;font-weight:600;color:var(--muted);letter-spacing:-.005em;padding:0 4px}
+.fnote2 i{font-size:15px;color:var(--faint);flex:none}
+
+/* ---- suggestions to tap, and the add buttons of an empty Library */
+.pills{display:flex;flex-wrap:wrap;gap:7px;justify-content:center}
+.pill{height:36px;padding:0 13px 0 10px;border-radius:999px;background:var(--surface);box-shadow:var(--e1);display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:600;letter-spacing:-.02em;color:var(--ink)}
+:root[data-theme="dark"] .pill{border:1px solid var(--hair)}
+.pill i{font-size:16px;color:var(--muted)}
+.empty .or{margin-top:26px;font-size:12px;font-weight:600;letter-spacing:-.005em;color:var(--muted)}
+.empty .pills{margin-top:12px}
+.empty.tight{padding-top:40px}
+.choice .pills{justify-content:flex-start;padding:12px 22px 0}
+.choice .hint2{padding:0 22px;margin-top:14px;font-size:11.5px;font-weight:600;color:var(--muted);letter-spacing:-.005em}
+
+/* ---- a square icon at the start of a row (the student's list of libraries) */
+.sq{width:42px;height:42px;border-radius:13px;background:var(--sunk);display:grid;place-items:center;color:var(--muted);font-size:21px;flex:none}
+
+/* ---- a file opened in the app: the page of a PDF */
+.vwr{padding:0 20px;margin-top:14px}
+.paper{background:#fff;border-radius:14px;box-shadow:var(--e2);height:452px;padding:26px 24px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.paper .h{height:15px;width:58%;border-radius:4px;background:#1B1B22;margin-bottom:6px}
+.paper i{display:block;height:5px;border-radius:5px;background:#D6D6DF}
+.paper i.s{width:72%}
+.paper i.m{width:88%}
+.paper .gap{height:8px;background:none}
+.pgno{display:flex;justify-content:center;margin-top:12px;font-family:var(--mono);font-size:12px;font-weight:700;letter-spacing:-.03em;color:var(--muted)}
+.vbar{position:absolute;left:20px;right:20px;bottom:40px;display:flex;gap:10px}
+.vbar .btn{flex:1;height:52px}
+
+/* ---- Home: one list, every test says what it is */
+.hl{display:flex;flex-direction:column;gap:10px}

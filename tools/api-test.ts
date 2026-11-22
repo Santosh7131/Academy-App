@@ -1,0 +1,776 @@
+// End-to-end checks of the marking rules against a running API (the deployed dev branch by default).
+// Creates its own students, questions and tests, then removes them.
+// Usage: node tools/api-test.ts [--env .env.local] [--base https://...] [--skip-wait]
+import { randomInt } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import pg from 'pg';
+
+const args = process.argv.slice(2);
+const envFile = args.includes('--env') ? args[args.indexOf('--env') + 1] : '.env.local';
+process.loadEnvFile(envFile);
+const BASE = (args.includes('--base') ? args[args.indexOf('--base') + 1] : process.env.NEON_FUNCTION_API_BASE_URL ?? '').replace(/\/$/, '');
+if (!BASE) throw new Error(`No API base URL (pass --base or set NEON_FUNCTION_API_BASE_URL in ${envFile}).`);
+const logins = JSON.parse(readFileSync(`tools/out/sample-logins.${process.env.NEON_BRANCH}.json`, 'utf8'));
+
+let pass = 0;
+let fail = 0;
+function check(name: string, ok: boolean, detail?: unknown) {
+  if (ok) pass++;
+  else fail++;
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok || detail === undefined ? '' : `  -> ${JSON.stringify(detail)}`}`);
+}
+
+async function api(method: string, path: string, token?: string, body?: unknown, headers: Record<string, string> = {}) {
+  const res = await fetch(BASE + path, {
+    method,
+    headers: {
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+      ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+      ...headers,
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const json: any = await res.json().catch(() => null);
+  return { status: res.status, body: json };
+}
+const login = (username: string, secret: string) => api('POST', '/auth/login', undefined, { username, secret });
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const iso = (msFromNow: number) => new Date(Date.now() + msFromNow).toISOString();
+
+const created = { users: [] as string[], questions: [] as string[], tests: [] as string[], subjects: [] as string[], papers: [] as string[], tutors: [] as string[] };
+const tag = `apitest${randomInt(1000, 9999)}`;
+
+// Groups exist from the moment a student, question or test needs one. The ones this run makes in the first
+// tuition are removed at the end, so the dev data is left as it was found.
+const FIRST_TUITION = '00000000-0000-4000-8000-0000000000a1';
+const snapshot = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+await snapshot.connect();
+const groupsBefore = new Set(
+  (await snapshot.query('select class_level, subject_id from groups where tuition_id = $1', [FIRST_TUITION])).rows.map((g) => `${g.class_level}:${g.subject_id}`),
+);
+await snapshot.end();
+
+try {
+  check('API is up', (await api('GET', '/')).status === 200);
+
+  const t = await login(logins.teacher.username, logins.teacher.password);
+  check('teacher logs in', t.status === 200 && t.body?.user?.role === 'teacher', t.body);
+  const T = t.body.token as string;
+
+  // Two temporary class 9 students.
+  const s1 = await api('POST', '/teacher/students', T, { display_name: 'Test Student One', class_level: 9, username: `${tag}.one`, pin: '1234' });
+  const s2 = await api('POST', '/teacher/students', T, { display_name: 'Test Student Two', class_level: 9, username: `${tag}.two`, pin: '5678' });
+  check('teacher creates students', s1.status === 201 && s2.status === 201, [s1.body, s2.body]);
+  created.users.push(s1.body.student.id, s2.body.student.id);
+  // These two were "added a week ago", so a test that closed an hour ago was theirs to miss.
+  const back = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await back.connect();
+  await back.query(`update memberships set joined_at = now() - interval '7 days' where user_id = any($1::uuid[])`, [[s1.body.student.id, s2.body.student.id]]);
+  await back.end();
+  const dup = await api('POST', '/teacher/students', T, { display_name: 'Dup', class_level: 9, username: `${tag}.one`, pin: '1111' });
+  check('duplicate username is refused', dup.status === 409 && dup.body?.error?.code === 'username_taken', dup.body);
+
+  // Three questions; the third must keep its option order.
+  const qdefs = [
+    { text: `${tag} What is $2 + 2$?`, options: ['$3$', '$4$', '$5$', '$6$'], correct_option: 1 },
+    { text: `${tag} What is $3 \\times 3$?`, options: ['$6$', '$9$', '$12$', '$33$'], correct_option: 1 },
+    { text: `${tag} Which are even?`, options: ['$2$', '$4$', 'Both (a) and (b)', 'Neither'], correct_option: 2 },
+  ];
+  for (const d of qdefs) {
+    const r = await api('POST', '/teacher/questions', T, { class_level: 9, ...d });
+    check(`teacher creates question "${d.text.slice(tag.length + 1, tag.length + 20)}"`, r.status === 201, r.body);
+    created.questions.push(r.body.id);
+  }
+  const keep = await api('GET', `/teacher/questions/${created.questions[2]}`, T);
+  check('"Both (a) and (b)" question keeps option order', keep.body?.question?.keep_option_order === true, keep.body?.question);
+
+  // Every test needs a closing time (one day ahead unless given), and a closing time already past is
+  // set after posting, since the server will not post such a test.
+  const mkTest = async (title: string, extra: Record<string, unknown>) => {
+    const wanted = (extra.closes_at as string | undefined) ?? iso(86_400_000);
+    const past = new Date(wanted).getTime() <= Date.now();
+    const body = {
+      title: `${tag} ${title}`, class_level: 9, question_ids: created.questions, shuffle: true,
+      assign_all: false, student_ids: created.users, ...extra, closes_at: past ? iso(3_600_000) : wanted,
+    };
+    const r = await api('POST', '/teacher/tests', T, body);
+    created.tests.push(r.body.id);
+    const p = await api('POST', `/teacher/tests/${r.body.id}/publish`, T, { published: true });
+    if (past) await api('PATCH', `/teacher/tests/${r.body.id}`, T, { ...body, closes_at: wanted });
+    check(`test "${title}" created and published`, r.status === 201 && p.status === 200, [r.body, p.body]);
+    return r.body.id as string;
+  };
+  const A = await mkTest('open', { time_limit_min: 10, opens_at: iso(-60_000), closes_at: iso(30 * 60_000) });
+
+  // Students log in and see the test.
+  const l1 = await login(`${tag}.one`, '1234');
+  const l2 = await login(`${tag}.two`, '5678');
+  check('students log in with username + PIN', l1.status === 200 && l2.status === 200, [l1.body, l2.body]);
+  const S1 = l1.body.token as string;
+  const S2 = l2.body.token as string;
+  const home = await api('GET', '/student/home', S1);
+  const homeTest = home.body?.tests?.find((x: any) => x.id === A);
+  check('home lists the test as open', homeTest?.state === 'open', homeTest);
+
+  // Starting never sends the answers.
+  const st1 = await api('POST', `/student/tests/${A}/start`, S1);
+  const st2 = await api('POST', `/student/tests/${A}/start`, S2);
+  check('student starts the test', st1.status === 200 && st1.body.questions.length === 3, st1.body);
+  check('start payload contains no correct answers', !/correct/i.test(JSON.stringify(st1.body)));
+  const again = await api('POST', `/student/tests/${A}/start`, S1);
+  check('starting again resumes the same attempt', again.body?.attempt?.id === st1.body.attempt.id);
+  const sig = (b: any) => JSON.stringify(b.questions.map((x: any) => [x.id, x.options]));
+  check('two students get different orders', sig(st1.body) !== sig(st2.body));
+  const kept = st1.body.questions.find((x: any) => x.id === created.questions[2]);
+  check('kept-order question is not shuffled', JSON.stringify(kept.options) === JSON.stringify(qdefs[2].options), kept.options);
+
+  // Answer two right and one wrong, by option text, through the shuffle.
+  const answers = st1.body.questions.map((x: any) => {
+    const def = qdefs[created.questions.indexOf(x.id)];
+    const rightText = def.options[def.correct_option];
+    const isLast = x.id === created.questions[0];
+    const choice = isLast ? x.options.findIndex((o: string) => o !== rightText) : x.options.indexOf(rightText);
+    return { question_id: x.id, choice, flagged: isLast };
+  });
+  const saved = await api('PUT', `/student/attempts/${st1.body.attempt.id}/answers`, S1, { answers });
+  check('answers save', saved.status === 200 && saved.body.saved === 3, saved.body);
+  const resume = await api('POST', `/student/tests/${A}/start`, S1);
+  check('saved answers come back on resume', resume.body.questions.every((x: any) => x.chosen !== null), resume.body.questions);
+
+  // One request can carry the same question twice (a phone catching up after a bad connection): the later answer counts. And a question
+  // that is not part of the test refuses the whole request, so none of it is saved. Then the original answers go back for what follows.
+  const attemptUrl = `/student/attempts/${st1.body.attempt.id}/answers`;
+  const q1a = st1.body.questions[1].id;
+  const twice = await api('PUT', attemptUrl, S1, { answers: [{ question_id: q1a, choice: 0 }, { question_id: q1a, choice: 2, flagged: true }] });
+  const afterTwice = (await api('POST', `/student/tests/${A}/start`, S1)).body.questions.find((x: any) => x.id === q1a);
+  check('the same question twice in one save: the later answer counts', twice.status === 200 && twice.body.saved === 2 && afterTwice?.chosen === 2 && afterTwice?.flagged === true, [twice.body, afterTwice]);
+  const refused = await api('PUT', attemptUrl, S1, { answers: [{ question_id: q1a, choice: 1 }, { question_id: '00000000-0000-4000-8000-0000000000aa', choice: 0 }] });
+  const afterRefused = (await api('POST', `/student/tests/${A}/start`, S1)).body.questions.find((x: any) => x.id === q1a);
+  check('a question that is not in the test refuses the whole save, and none of it is kept', refused.status === 400 && afterRefused?.chosen === 2, [refused.body, afterRefused]);
+  const emptySave = await api('PUT', attemptUrl, S1, { answers: [] });
+  check('an empty save is fine', emptySave.status === 200 && emptySave.body.saved === 0, emptySave.body);
+  const many = await api('PUT', attemptUrl, S1, { answers: Array.from({ length: 200 }, (_, i) => ({ question_id: st1.body.questions[i % 3].id, choice: i % 4 })) });
+  check('200 answers in one save go through', many.status === 200 && many.body.saved === 200, many.body);
+  check('and the original answers can go back', (await api('PUT', attemptUrl, S1, { answers })).status === 200);
+
+  const sub = await api('POST', `/student/attempts/${st1.body.attempt.id}/submit`, S1, {});
+  check('submit grades 2 of 3', sub.status === 200 && sub.body.attempt.score === 2 && sub.body.attempt.max_score === 3, sub.body?.attempt);
+  const reviewOk = sub.body.review.every((r: any) => {
+    const def = qdefs[created.questions.indexOf(r.id)];
+    return r.options[r.correct] === def.options[def.correct_option];
+  });
+  check('review shows the right correct option through the shuffle', reviewOk, sub.body.review);
+  check('answers cannot change after submit', (await api('PUT', `/student/attempts/${st1.body.attempt.id}/answers`, S1, { answers })).status === 409);
+  // The teacher finds the key was wrong: correcting the answer re-marks the test already written.
+  const q0 = created.questions[0];
+  const picked = st1.body.questions.find((x: any) => x.id === q0).options[answers.find((x: any) => x.question_id === q0).choice];
+  const fixKey = await api('PATCH', `/teacher/questions/${q0}`, T, { class_level: 9, ...qdefs[0], correct_option: qdefs[0].options.indexOf(picked) });
+  const remarked = (await api('GET', `/teacher/attempts/${st1.body.attempt.id}`, T)).body?.attempt;
+  check('a corrected answer re-marks the test already written', fixKey.body?.regraded >= 1 && remarked?.score === 3, [fixKey.body, remarked]);
+  await api('PATCH', `/teacher/questions/${q0}`, T, { class_level: 9, ...qdefs[0] });
+  check('and changing it back puts the marks back', (await api('GET', `/teacher/attempts/${st1.body.attempt.id}`, T)).body?.attempt?.score === 2);
+  const second = await api('POST', `/student/tests/${A}/start`, S1);
+  check('second attempt is refused', second.status === 409 && second.body?.error?.code === 'already_done', second.body);
+
+  const grant = await api('POST', `/teacher/tests/${A}/retake`, T, { student_id: created.users[0] });
+  const retake = await api('POST', `/student/tests/${A}/start`, S1);
+  check('teacher-granted retake starts a new attempt', grant.status === 200 && retake.status === 200 && retake.body.attempt.id !== st1.body.attempt.id, retake.body);
+  const sub2 = await api('POST', `/student/attempts/${retake.body.attempt.id}/submit`, S1, {});
+  check('empty retake scores 0 with 3 skipped', sub2.body?.attempt?.score === 0 && sub2.body?.attempt?.skipped === 3, sub2.body?.attempt);
+
+  const res = await api('GET', `/teacher/tests/${A}/results`, T);
+  const row1 = res.body?.students?.find((s: any) => s.id === created.users[0]);
+  check('teacher results list both students', res.status === 200 && res.body.students.length === 2, res.body?.students);
+  check('teacher results show the latest attempt', row1?.attempt_no === 2 && row1?.status === 'submitted', row1);
+  check('per-question stats are present', res.body?.questions?.length === 3 && res.body.questions.every((x: any) => x.option_counts.length === 4), res.body?.questions);
+
+  check('students cannot open teacher pages', (await api('GET', '/teacher/dashboard', S1)).status === 403);
+  check('teacher dashboard loads', (await api('GET', '/teacher/dashboard', T)).status === 200);
+  // A published test with no closing time is open even before anyone starts it.
+  const forever = await mkTest('no closing time', {});
+  const dash = await api('GET', '/teacher/dashboard', T);
+  check('the dashboard lists an open test nobody has started', dash.body?.live?.some((x: any) => x.id === forever && x.writing === 0), dash.body?.live);
+  check('the older app still gets a school list, now empty', JSON.stringify((await api('GET', '/teacher/schools', T)).body) === '{"schools":[]}');
+  check('students no longer have a school', !('school' in ((await api('GET', '/teacher/students', T)).body?.students?.[0] ?? {})));
+
+  // Closing is compulsory.
+  const body0 = { title: `${tag} no closing`, class_level: 9, question_ids: created.questions, assign_all: false, student_ids: created.users };
+  const ncl = await api('POST', '/teacher/tests', T, body0);
+  created.tests.push(ncl.body.id);
+  await api('POST', `/teacher/tests/${ncl.body.id}/publish`, T, { published: true });
+  const nclRow = (await api('GET', `/teacher/tests/${ncl.body.id}`, T)).body?.test;
+  const nclHours = (new Date(nclRow?.closes_at).getTime() - Date.now()) / 3_600_000;
+  check('a test posted without a closing time gets one, at 9 pm in India', nclHours >= 3 && nclHours <= 27 && new Date(nclRow.closes_at).getUTCMinutes() === 30, nclRow);
+  check('and cannot lose it afterwards',
+    (await api('PATCH', `/teacher/tests/${ncl.body.id}`, T, { ...body0, closes_at: null })).status === 200
+    && !!(await api('GET', `/teacher/tests/${ncl.body.id}`, T)).body?.test?.closes_at);
+  const pcl = await api('POST', '/teacher/tests', T, { ...body0, title: `${tag} past`, closes_at: iso(-60_000) });
+  created.tests.push(pcl.body.id);
+  check('nor with a closing time that has passed',
+    (await api('POST', `/teacher/tests/${pcl.body.id}/publish`, T, { published: true })).body?.error?.code === 'closing_passed');
+
+  // Marks and the right answers show the moment a test is handed in: not at the closing time, and not once everyone has
+  // finished. Every app version gets them the same way (1.4.0 to 1.6.0 still read results_open, which is always true).
+  const NEWAPP = { 'x-app': 'tuition_app/1.6.0+8' };
+  const H = await mkTest('marks at once', { closes_at: iso(86_400_000) });
+  const h1 = await api('POST', `/student/tests/${H}/start`, S1);
+  const hsub = await api('POST', `/student/attempts/${h1.body.attempt.id}/submit`, S1, { answers: [] }, NEWAPP);
+  check('a student who submits gets the marks and the review at once, with the test still open and a student still to write it',
+    hsub.status === 200 && hsub.body?.review?.length === 3 && hsub.body?.attempt?.max_score === 3 && !('waiting' in hsub.body), hsub.body);
+  const hres = await api('GET', `/student/attempts/${h1.body.attempt.id}/result`, S1, undefined, NEWAPP);
+  check('and can read them again afterwards', hres.body?.review?.length === 3 && !('waiting' in hres.body), hres.body);
+  const hold = await api('GET', `/student/attempts/${h1.body.attempt.id}/result`, S1);
+  check('an app that does not say which version it is gets the same', hold.body?.review?.length === 3 && !('waiting' in hold.body), hold.body);
+  const holdHome = (await api('GET', '/student/home', S1, undefined, NEWAPP)).body?.tests?.find((x: any) => x.id === H);
+  check('the home list carries the marks', holdHome?.results_open === true && holdHome?.attempt?.max_score === 3 && holdHome?.attempt?.score !== null, holdHome);
+  const hresults = (await api('GET', '/student/results', S1, undefined, NEWAPP)).body?.results?.find((x: any) => x.test_id === H);
+  check('so does the results list', hresults?.results_open === true && hresults?.max_score === 3 && hresults?.score !== null, hresults);
+  check('the tutor sees the marks too', (await api('GET', `/teacher/attempts/${h1.body.attempt.id}`, T)).body?.attempt?.max_score === 3);
+  const h2 = await api('POST', `/student/tests/${H}/start`, S2);
+  const hsub2 = await api('POST', `/student/attempts/${h2.body.attempt.id}/submit`, S2, { answers: [] }, NEWAPP);
+  check('the last student gets theirs the same way', hsub2.body?.attempt?.max_score === 3 && hsub2.body?.review?.length === 3, hsub2.body);
+
+  const M = await mkTest('one student still to write it', { closes_at: iso(86_400_000) });
+  const m1 = await api('POST', `/student/tests/${M}/start`, S1);
+  const msub = await api('POST', `/student/attempts/${m1.body.attempt.id}/submit`, S1, { answers: [] }, NEWAPP);
+  check('marks need no help from the tutor', msub.body?.review?.length === 3 && !('waiting' in msub.body), msub.body);
+  check('the tutor has nothing to show: that route is gone', (await api('POST', `/teacher/tests/${M}/release-results`, T)).status === 404);
+  check('the results page says the marks are open', (await api('GET', `/teacher/tests/${M}/results`, T)).body?.test?.results_open === true
+    && (await api('GET', `/teacher/tests/${H}/results`, T)).body?.test?.results_open === true);
+
+  // Several tutors share one tuition, and the home and group pages group tests by class and subject.
+  const tutorName = `${tag}.tutor`;
+  const nt = await api('POST', '/teacher/tutors', T, { display_name: 'Test Tutor', username: tutorName, password: 'tutor-pass-123' });
+  check('a tutor adds another tutor', nt.status === 201 && nt.body?.tutor?.username === tutorName, nt.body);
+  created.tutors.push(nt.body?.tutor?.id);
+  const tl = await login(tutorName, 'tutor-pass-123');
+  check('the new tutor logs in and sees the same groups',
+    tl.status === 200 && JSON.stringify((await api('GET', '/teacher/home', tl.body.token)).body?.groups) === JSON.stringify((await api('GET', '/teacher/home', T)).body?.groups));
+  check('a tutor cannot turn off their own login', (await api('POST', `/teacher/tutors/${t.body.user.id}/active`, T, { active: false })).status === 409);
+  check('the tutor turns the other one off', (await api('POST', `/teacher/tutors/${nt.body.tutor.id}/active`, T, { active: false })).status === 200
+    && (await login(tutorName, 'tutor-pass-123')).status !== 200);
+  // M still has a student to write it, so it is live. H has been handed in by everyone it was given to, so it is finished
+  // and leaves the home screen, whatever its closing time says.
+  const homeGroups = (await api('GET', '/teacher/home', T)).body?.groups;
+  const home9 = homeGroups?.find((g: any) => g.class_level === 9 && g.live.some((x: any) => x.id === M));
+  check('home lists the live test under its group', !!home9 && home9.students >= 2 && home9.live.find((x: any) => x.id === M)?.assigned === 2, home9);
+  check('a test everyone has handed in is no longer live', !homeGroups?.some((g: any) => g.live.some((x: any) => x.id === H) || g.posted.some((x: any) => x.id === H)), homeGroups);
+  const grp9 = await api('GET', `/teacher/groups/9/${home9?.subject_id}`, T);
+  check('the group page lists its students and tests', grp9.status === 200 && grp9.body?.students?.length >= 2 && grp9.body?.tests?.some((x: any) => x.id === H), grp9.body?.group);
+  check('and says which tests everyone has finished',
+    grp9.body?.tests?.find((x: any) => x.id === H)?.everyone_done === true && grp9.body?.tests?.find((x: any) => x.id === M)?.everyone_done === false, grp9.body?.tests?.map((x: any) => [x.title, x.everyone_done]));
+
+  // Window rules.
+  const B = await mkTest('future', { opens_at: iso(86_400_000), closes_at: iso(90_000_000) });
+  const C = await mkTest('closed', { opens_at: iso(-7_200_000), closes_at: iso(-3_600_000) });
+  const sb = await api('POST', `/student/tests/${B}/start`, S2);
+  const sc = await api('POST', `/student/tests/${C}/start`, S2);
+  check('not-yet-open test is refused', sb.status === 409 && sb.body.error.code === 'not_open_yet', sb.body);
+  check('closed test is refused', sc.status === 409 && sc.body.error.code === 'closed', sc.body);
+  const home2 = await api('GET', '/student/home', S2);
+  const states = Object.fromEntries(home2.body.tests.filter((x: any) => [B, C].includes(x.id)).map((x: any) => [x.id, x.state]));
+  check('home shows upcoming and missed', states[B] === 'upcoming' && states[C] === 'missed', states);
+
+  // A student added after a test closed has not missed it, and it was never given to them.
+  const G = await mkTest('closed for the class', { assign_all: true, student_ids: [], opens_at: iso(-7_200_000), closes_at: iso(-3_600_000) });
+  const late = await api('POST', '/teacher/students', T, { display_name: 'Test Student Late', class_level: 9, username: `${tag}.late`, pin: '4321' });
+  created.users.push(late.body.student.id);
+  const SL = (await login(`${tag}.late`, '4321')).body.token as string;
+  const homeLate = (await api('GET', '/student/home', SL)).body?.tests as any[];
+  check('a student added after a test closed has not missed it', Array.isArray(homeLate) && !homeLate.some((x) => x.id === G), homeLate?.map((x) => [x.title, x.state]));
+  check('while a student who was there before has', (await api('GET', '/student/home', S2)).body?.tests?.find((x: any) => x.id === G)?.state === 'missed');
+  const resG = (await api('GET', `/teacher/tests/${G}/results`, T)).body;
+  check('and the test was never given to them', !resG?.students?.some((x: any) => x.id === late.body.student.id) && resG?.students?.some((x: any) => x.id === s2.body.student.id), resG?.summary);
+  const lateDetail = (await api('GET', `/teacher/students/${late.body.student.id}`, T)).body;
+  check('nor does the tutor see it among their missed tests', Array.isArray(lateDetail?.missed) && lateDetail.missed.length === 0, lateDetail?.missed);
+
+  // Deadline: the attempt is submitted automatically once the closing time plus grace has passed.
+  if (!args.includes('--skip-wait')) {
+    const D = await mkTest('closing', { opens_at: iso(-60_000), closes_at: iso(6_000) });
+    const sd = await api('POST', `/student/tests/${D}/start`, S2);
+    check('deadline is the closing time', sd.status === 200 && Math.abs(new Date(sd.body.attempt.deadline_at).getTime() - (Date.now() + 6_000)) < 15_000, sd.body?.attempt);
+    const one = sd.body.questions[0];
+    await api('PUT', `/student/attempts/${sd.body.attempt.id}/answers`, S2, { answers: [{ question_id: one.id, choice: 0 }] });
+    console.log('      waiting 40 s for the deadline and grace period...');
+    await sleep(40_000);
+    const late = await api('PUT', `/student/attempts/${sd.body.attempt.id}/answers`, S2, { answers: [{ question_id: one.id, choice: 1 }] });
+    check('saving after the deadline is refused', late.status === 409 && late.body.error.code === 'time_up', late.body);
+    const r = await api('GET', `/student/attempts/${sd.body.attempt.id}/result`, S2);
+    check('expired attempt was auto-submitted with the saved answer', r.status === 200 && r.body.attempt.auto_submitted === true && r.body.review.some((x: any) => x.chosen !== null), r.body?.attempt);
+  }
+
+  // Groups: a class and a subject. A group test reaches only the class's students who study it.
+  // The group checks use a subject of their own, so no real student (on live, a real 9th Science
+  // student) is ever given, or notified about, a test from this script.
+  const subj = await api('GET', '/teacher/subjects', T);
+  const maths = subj.body?.subjects?.find((x: any) => x.is_default);
+  check('Maths and Science are subjects, Maths the default',
+    maths?.name === 'Maths' && subj.body?.subjects?.some((x: any) => x.name === 'Science'), subj.body);
+  const ns = await api('POST', '/teacher/subjects', T, { name: tag });
+  check('teacher adds a subject', ns.status === 201 && ns.body?.subject?.name === tag, ns.body);
+  const own = ns.body.subject;
+  created.subjects.push(own.id);
+  const s3 = await api('POST', '/teacher/students', T, {
+    display_name: 'Test Student Three', class_level: 9, username: `${tag}.three`, pin: '4321', subject_ids: [own.id],
+  });
+  check('a student of one other subject can be added', s3.status === 201, s3.body);
+  created.users.push(s3.body.student.id);
+  const names = (r: any) => JSON.stringify(r.body?.student?.subjects?.map((x: any) => x.name));
+  const d1 = await api('GET', `/teacher/students/${created.users[0]}`, T);
+  const d3 = await api('GET', `/teacher/students/${s3.body.student.id}`, T);
+  check('students added by the older app study maths', names(d1) === '["Maths"]', d1.body?.student?.subjects);
+  check('that student studies only that subject', names(d3) === JSON.stringify([tag]), d3.body?.student?.subjects);
+
+  const sq = await api('POST', '/teacher/questions', T, {
+    class_level: 9, subject_id: own.id, text: `${tag} Which gas do plants take in for photosynthesis?`,
+    options: ['Oxygen', 'Carbon dioxide', 'Nitrogen', 'Hydrogen'], correct_option: 1,
+  });
+  created.questions.push(sq.body.id);
+  const sqRow = await api('GET', `/teacher/questions/${sq.body.id}`, T);
+  check('a question can belong to that subject', sq.status === 201 && sqRow.body?.question?.subject === tag, sqRow.body?.question);
+  const sciList = await api('GET', `/teacher/questions?class=9&subject=${own.id}&q=${tag}`, T);
+  check('the question bank filters by subject', sciList.body?.questions?.length === 1 && sciList.body.questions[0].id === sq.body.id,
+    sciList.body?.questions?.map((x: any) => x.text));
+
+  const g = await api('POST', '/teacher/tests', T, {
+    title: `${tag} group`, class_level: 9, subject_id: own.id, question_ids: [sq.body.id],
+    assign_all: false, assign_group: true, opens_at: iso(-60_000), closes_at: iso(30 * 60_000),
+  });
+  created.tests.push(g.body.id);
+  const gp = await api('POST', `/teacher/tests/${g.body.id}/publish`, T, { published: true });
+  check('a test can go to a class + subject group', g.status === 201 && gp.status === 200, [g.body, gp.body]);
+  const S3 = (await login(`${tag}.three`, '4321')).body.token as string;
+  const sees = async (token: string) => ((await api('GET', '/student/home', token)).body?.tests ?? []).some((x: any) => x.id === g.body.id);
+  check('a group member sees the group test', await sees(S3));
+  check('a classmate outside the group does not see it', !(await sees(S1)));
+  check('and cannot start it', (await api('POST', `/student/tests/${g.body.id}/start`, S1)).status === 404);
+  const gr = await api('GET', `/teacher/tests/${g.body.id}/results`, T);
+  check('the group test results list only the group', JSON.stringify(gr.body?.students?.map((x: any) => x.id)) === JSON.stringify([s3.body.student.id]),
+    gr.body?.students?.map((x: any) => x.display_name));
+  const groups = await api('GET', '/teacher/groups', T);
+  check('groups count the new group', groups.body?.groups?.some((x: any) => x.class_level === 9 && x.subject === tag && x.students === 1), groups.body);
+  await api('PATCH', `/teacher/students/${created.users[0]}`, T, { subject_ids: [maths.id, own.id] });
+  check('adding Science to a student brings in the group test', await sees(S1));
+
+  const old = await api('POST', '/teacher/tests', T, { title: `${tag} older app`, class_level: 9, question_ids: [created.questions[0]] });
+  created.tests.push(old.body.id);
+  const oldRow = (await api('GET', `/teacher/tests/${old.body.id}`, T)).body?.test;
+  check('a test from the older app is a whole-class maths test', oldRow?.subject_id === maths.id && oldRow?.assign_all === true && oldRow?.assign_group === false, oldRow);
+  // A test stays inside its group: even a whole-class maths test never reaches a classmate who takes only another subject.
+  await api('POST', `/teacher/tests/${old.body.id}/publish`, T, { published: true });
+  const seesTest = async (token: string, id: string) => ((await api('GET', '/student/home', token)).body?.tests ?? []).some((x: any) => x.id === id);
+  check('a whole-class maths test stays out of a student who takes only another subject', !(await seesTest(S3, old.body.id)));
+  check('who cannot start it either', (await api('POST', `/student/tests/${old.body.id}/start`, S3)).status === 404);
+  check('while the maths students of the class still get it', await seesTest(S2, old.body.id));
+  check('a subject in use cannot be deleted', (await api('DELETE', `/teacher/subjects/${own.id}`, T)).status === 409);
+  check('Maths cannot be deleted', (await api('DELETE', `/teacher/subjects/${maths.id}`, T)).status === 409);
+
+  // A question paper is kept under its name and lists the questions saved from it, in paper order.
+  // (The app before 1.3 sends the details up front, with a year and school that are now ignored.)
+  const pp = await api('POST', '/teacher/papers', T, { class_level: 9, subject_id: maths.id, exam_name: `${tag} paper`, year: 2025, pages: 1 });
+  const paperId = pp.body?.paper?.id;
+  if (paperId) created.papers.push(paperId);
+  check('teacher uploads a named paper', pp.status === 201 && pp.body?.paper?.exam_name === `${tag} paper`, pp.body);
+  // Two questions as the AI reader leaves them, with the right options already marked by the teacher.
+  const pdb = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await pdb.connect();
+  await pdb.query(
+    `insert into paper_drafts (paper_id, page_no, seq, number_label, kind, text, options, correct_option)
+     values ($1, 1, 2, '2', 'mcq', $3, $4, 1), ($1, 1, 1, '1', 'mcq', $2, $4, 0)`,
+    [paperId, `${tag} first`, `${tag} second`, ['a', 'b', 'c', 'd']],
+  );
+  await pdb.end();
+  const sv = await api('POST', `/teacher/papers/${paperId}/save`, T);
+  check('checked questions from a paper are saved', sv.status === 200 && sv.body?.saved === 2, sv.body);
+  const one = await api('GET', `/teacher/papers/${paperId}`, T);
+  check('the paper lists its saved questions in paper order',
+    JSON.stringify(one.body?.questions?.map((x: any) => x.text)) === JSON.stringify([`${tag} first`, `${tag} second`]), one.body?.questions);
+  const rn = await api('PATCH', `/teacher/papers/${paperId}`, T, { exam_name: `${tag} renamed`, year: null, school_id: null });
+  check('teacher renames the paper', rn.status === 200 && rn.body?.paper?.exam_name === `${tag} renamed` && !('year' in rn.body?.paper), rn.body);
+  const prow = (await api('GET', '/teacher/papers', T)).body?.papers?.find((x: any) => x.id === paperId);
+  check('the papers list shows the new name and the saved count', prow?.exam_name === `${tag} renamed` && prow?.saved === 2, prow);
+  check('a paper cannot be renamed to nothing', (await api('PATCH', `/teacher/papers/${paperId}`, T, { exam_name: '  ' })).status === 400);
+
+  // A question the bank already has is not saved again, however it is spaced or punctuated; and
+  // one AI found no fitting option for loses that note, and gets another AI look, once reworded.
+  const ddb = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await ddb.connect();
+  const twin = await ddb.query(
+    `insert into paper_drafts (paper_id, page_no, seq, number_label, kind, text, options, correct_option, answer_checked, ai_note)
+     values ($1, 1, 3, '3', 'mcq', $2, $3, 0, true, null), ($1, 1, 4, '4', 'mcq', $4, $3, null, true, 'no_option') returning id`,
+    [paperId, `${tag}  first.`, ['a', 'b', 'c', 'd'], `${tag} misprinted`],
+  );
+  await ddb.end();
+  const resave = await api('POST', `/teacher/papers/${paperId}/save`, T);
+  check('a question the bank already has is not saved again', resave.body?.saved === 0 && resave.body?.already_in_bank === 1, resave.body);
+  const fixd = await api('PATCH', `/teacher/drafts/${twin.rows[1].id}`, T, { text: `${tag} reworded` });
+  check('a reworded question loses its AI note and gets another AI look',
+    fixd.status === 200 && fixd.body?.draft?.ai_note === null && fixd.body?.draft?.answer_checked === false, fixd.body);
+
+  // A printed answer key replaces an answer AI worked out (the app answers early pages while a late
+  // page, perhaps holding the key, is still being read), but never one the teacher marked. A
+  // question AI could not read whole stays unanswered until the teacher says it looks right.
+  const keyp = await api('POST', '/teacher/papers', T, { class_level: 9, subject_id: maths.id, exam_name: `${tag} key wins`, pages: 1 });
+  const keypId = keyp.body?.paper?.id;
+  if (keypId) created.papers.push(keypId);
+  const kcx = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await kcx.connect();
+  const unq = await kcx.query(
+    `insert into paper_drafts (paper_id, page_no, seq, number_label, kind, text, options, correct_option, answer_source, answer_checked, ai_note)
+     values ($1, 1, 0, '5', 'mcq', $2, $5, 0, 'ai', true, null), ($1, 1, 1, '6', 'mcq', $3, $5, 1, 'teacher', true, null),
+            ($1, 1, 2, '7', 'mcq', $4, $5, null, null, true, 'unclear') returning id`,
+    [keypId, `${tag} ai one`, `${tag} teacher one`, `${tag} unclear one`, ['a', 'b', 'c', 'd']],
+  );
+  await kcx.query(`update paper_pages set ai_status = 'done', answer_key = $2 where paper_id = $1 and page_no = 1`,
+    [keypId, JSON.stringify([{ number: '5', answer: 'c' }, { number: '6', answer: 'd' }])]);
+  await kcx.end();
+  const winK = await api('POST', `/teacher/papers/${keypId}/answers`, T);
+  check('a printed key replaces an answer AI worked out', winK.status === 200 && winK.body?.from_key === 1 && winK.body?.tried === 0, winK.body);
+  const wrows = (await api('GET', `/teacher/papers/${keypId}`, T)).body?.drafts ?? [];
+  check('but never the teacher\'s own mark, and AI does not answer an unclear question',
+    JSON.stringify(wrows.map((d: any) => [d.correct_option, d.answer_source])) === '[[2,"key"],[1,"teacher"],[null,null]]', wrows);
+  const okd = await api('PATCH', `/teacher/drafts/${unq.rows[2].id}`, T, { confirmed: true });
+  check('"looks right" clears the unclear note and lets AI answer it',
+    okd.status === 200 && okd.body?.draft?.ai_note === null && okd.body?.draft?.answer_checked === false, okd.body);
+
+  // A question AI said needs its figure is never sent to AI to answer. When the tutor says it does not ("No figure needed", or she
+  // takes the figure off), one still without an answer goes to AI; one whose answer is known stays as it is.
+  const fcx = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await fcx.connect();
+  const figq = await fcx.query(
+    `insert into paper_drafts (paper_id, page_no, seq, number_label, kind, text, options, correct_option, answer_source, answer_checked, needs_diagram)
+     values ($1, 1, 3, '8', 'mcq', $2, $5, null, null, true, true), ($1, 1, 4, '9', 'mcq', $3, $5, 2, 'key', true, true),
+            ($1, 1, 5, '10', 'mcq', $4, $5, null, null, true, true) returning id`,
+    [keypId, `${tag} words enough`, `${tag} keyed figure`, `${tag} still needs it`, ['a', 'b', 'c', 'd']],
+  );
+  await fcx.end();
+  const freed = await api('PATCH', `/teacher/drafts/${figq.rows[0].id}`, T, { needs_diagram: false });
+  check('"No figure needed" lets AI answer a question it held back for its figure',
+    freed.status === 200 && freed.body?.draft?.needs_diagram === false && freed.body?.draft?.answer_checked === false, freed.body);
+  const keyFig = await api('PATCH', `/teacher/drafts/${figq.rows[1].id}`, T, { needs_diagram: false, image_key: null, figure_box: null });
+  check('but leaves alone one whose answer the key gave',
+    keyFig.status === 200 && keyFig.body?.draft?.answer_checked === true && keyFig.body?.draft?.correct_option === 2, keyFig.body);
+  const other = await api('PATCH', `/teacher/drafts/${figq.rows[2].id}`, T, { chapter_id: null });
+  check('and a change that does not touch the figure still holds the question back',
+    other.status === 200 && other.body?.draft?.needs_diagram === true && other.body?.draft?.answer_checked === true, other.body);
+  check('the tutor saying a question needs no figure makes it hers: the checks never undo it',
+    freed.body?.draft?.edited === true && freed.body?.draft?.figure_by === 'tutor', freed.body?.draft);
+  check('a change that does not touch the figure leaves the figure to the checks', other.body?.draft?.figure_by == null, other.body?.draft);
+
+  // A passage printed alone at the foot of one page is handed on to the questions at the top of the next once both pages are read
+  // (lib/passages.ts says which); until the page before is read, the questions on a page wait, and are not answered without it.
+  const pas = await api('POST', '/teacher/papers', T, { class_level: 9, subject_id: maths.id, exam_name: `${tag} passage across pages`, pages: 2 });
+  const pasId = pas.body?.paper?.id;
+  if (pasId) created.papers.push(pasId);
+  const xdb = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await xdb.connect();
+  const passage = 'A shop sells pens at Rs. 12 each and notebooks at Rs. 30 each, and gives a tenth off any bill above Rs. 200.';
+  const train = 'A train covers 300 km in 5 hours at a steady speed, and stops for ten minutes at each of its two halts.';
+  // Page 2: two questions of the passage (the second held as unclear for want of it), then two under a passage of their own, then a
+  // question to answer.
+  const pq = await xdb.query(
+    `insert into paper_drafts (paper_id, page_no, seq, number_label, kind, text, options, answer_checked, ai_note)
+     values ($1, 2, 0, '11', 'other', $2, '{}', false, null), ($1, 2, 1, '12', 'other', $3, '{}', true, 'unclear'),
+            ($1, 2, 2, '13', 'other', $4, '{}', false, null), ($1, 2, 3, '14', 'other', $5, '{}', false, null),
+            ($1, 2, 4, '15', 'mcq', $6, $7, false, null) returning id`,
+    [pasId, `${tag} What do 3 pens cost?`, `${tag} What do 2 notebooks cost?`, `${train}\n\n${tag} What is its speed?`,
+      `${train}\n\n${tag} How long is it on the way?`, `${tag} What is 7 times 8?`, ['54', '56', '58', '64']],
+  );
+  await xdb.query(`update paper_pages set uploaded = true, ai_status = 'pending' where paper_id = $1 and page_no = 1`, [pasId]);
+  await xdb.query(`update paper_pages set uploaded = true, ai_status = 'done' where paper_id = $1 and page_no = 2`, [pasId]);
+  const early = await api('POST', `/teacher/papers/${pasId}/answers`, T);
+  const textOf = async (i: number) => ((await api('GET', `/teacher/papers/${pasId}`, T)).body?.drafts ?? []).find((d: any) => d.id === pq.rows[i].id);
+  const [w0, w4] = [await textOf(0), await textOf(4)];
+  check('while the page before is being read, a page\'s questions are neither answered nor given a passage',
+    early.status === 200 && early.body?.tried === 0 && w4?.answer_claimed_at === null && w4?.answer_checked === false && w0?.text === `${tag} What do 3 pens cost?`,
+    [early.body, w0, w4]);
+  // The question to answer goes before AI is asked about it: the rest needs no AI.
+  await xdb.query(`update paper_drafts set status = 'discarded' where id = $1`, [pq.rows[4].id]);
+  await xdb.query(`update paper_pages set ai_status = 'done', passage_end = $2 where paper_id = $1 and page_no = 1`, [pasId, passage]);
+  await api('POST', `/teacher/papers/${pasId}/answers`, T);
+  const [c0, c1, c2, c3] = [await textOf(0), await textOf(1), await textOf(2), await textOf(3)];
+  check('once it is read, the questions at the top of the page start with the passage printed at its foot',
+    c0?.text === `${passage}\n\n${tag} What do 3 pens cost?` && c1?.text === `${passage}\n\n${tag} What do 2 notebooks cost?` && c0?.passage_prev && c1?.passage_prev,
+    [c0, c1]);
+  check('one held as unclear for want of it goes back to the checks', c1?.answer_checked === false && c1?.ai_note === null, c1);
+  check('questions under a passage of their own are left as they are',
+    c2?.text === `${train}\n\n${tag} What is its speed?` && c3?.text === `${train}\n\n${tag} How long is it on the way?` && !c2?.passage_prev && !c3?.passage_prev, [c2, c3]);
+  await xdb.query(`update paper_pages set passage_end = $2 where paper_id = $1 and page_no = 1`, [pasId, `${passage} Read it again.`]);
+  await api('POST', `/teacher/papers/${pasId}/answers`, T);
+  check('and a page is given its passage once, even when the page before is read again', (await textOf(0))?.text === `${passage}\n\n${tag} What do 3 pens cost?`);
+  await xdb.end();
+
+  // With AI on the server: the checks say whether a question needs its figure, whatever the reader said, and the tutor's word stands.
+  if ((await (await fetch(`${BASE}/`)).json().catch(() => ({}))).ai === true) {
+    const fp = await api('POST', '/teacher/papers', T, { class_level: 9, subject_id: maths.id, exam_name: `${tag} figure checks`, pages: 1 });
+    const fpId = fp.body?.paper?.id;
+    if (fpId) created.papers.push(fpId);
+    const fdb = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+    await fdb.connect();
+    const fq = await fdb.query(
+      `insert into paper_drafts (paper_id, page_no, seq, number_label, kind, text, options, needs_diagram)
+       values ($1, 1, 0, '1', 'mcq', $2, $5, true), ($1, 1, 1, '2', 'mcq', $3, $6, false), ($1, 1, 2, '3', 'mcq', $4, $6, true) returning id`,
+      [fpId, 'In the figure, triangle ABC has a right angle at B, AB = 3 cm and BC = 4 cm. Find AC.', 'In the given figure, find the value of x.',
+        'In the figure above, find the angle marked y.', ['5 cm', '6 cm', '7 cm', '12 cm'], ['30°', '45°', '60°', '90°']],
+    );
+    await fdb.query(`update paper_pages set ai_status = 'done' where paper_id = $1`, [fpId]);
+    await fdb.end();
+    // The tutor says the third needs no figure (it does): hers to say.
+    await api('PATCH', `/teacher/drafts/${fq.rows[2].id}`, T, { needs_diagram: false });
+    const fa = await api('POST', `/teacher/papers/${fpId}/answers`, T);
+    const fds = (await api('GET', `/teacher/papers/${fpId}`, T)).body?.drafts ?? [];
+    const [w, x, y] = fq.rows.map((r: any) => fds.find((d: any) => d.id === r.id));
+    if (fa.status === 200 && fa.body?.tried === 3) {
+      check('a question the reader flagged but whose words are enough: the flag goes and AI answers it', w?.needs_diagram === false && (w?.correct_option === 0 || w?.correct_option === null), w);
+      check('a question the reader missed that needs its figure: it is flagged and waits for the tutor',
+        x?.needs_diagram === true && x?.answer_checked === true && x?.correct_option === null && x?.ai_note === null && x?.ai_votes === null, x);
+      check('the tutor saying no figure is needed stands, and AI marks nothing it cannot see', y?.needs_diagram === false && y?.correct_option === null, y);
+    } else {
+      console.log(`      (AI was busy, so the figure checks were skipped: ${fa.status} ${JSON.stringify(fa.body)})`);
+    }
+  }
+
+  // A question the first two checks could not settle waits for a second opinion from a stronger model, a call of its
+  // own. A printed key, the tutor's mark or rewording ends the wait, and a second opinion that cannot be had twice
+  // is given up on (what each check chose stays on the card).
+  const sop = await api('POST', '/teacher/papers', T, { class_level: 9, subject_id: maths.id, exam_name: `${tag} second opinion`, pages: 1 });
+  const sopId = sop.body?.paper?.id;
+  if (sopId) created.papers.push(sopId);
+  const sdb = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await sdb.connect();
+  const votes = (tries: number) => JSON.stringify({ solver: { answer: 0, confidence: 0.95 }, checker: { answer: 1, confidence: 0.95 }, tries });
+  const sopRows = await sdb.query(
+    `insert into paper_drafts (paper_id, page_no, seq, number_label, kind, text, options, answer_checked, ai_note, ai_picks, ai_votes)
+     values ($1, 1, 0, '1', 'mcq', $2, $6, true, 'disagree', '{"solver":0,"checker":1}', $7),
+            ($1, 1, 1, '2', 'mcq', $3, $6, true, 'disagree', '{"solver":0,"checker":1}', $7),
+            ($1, 1, 2, '3', 'mcq', $4, $6, true, 'disagree', '{"solver":0,"checker":1}', $8),
+            ($1, 1, 3, '4', 'mcq', $5, $6, true, 'disagree', '{"solver":0,"checker":1}', $7) returning id`,
+    [sopId, `${tag} so reworded`, `${tag} so marked`, `${tag} so last try`, `${tag} so key`, ['a', 'b', 'c', 'd'], votes(0), votes(1)],
+  );
+  await sdb.query(`update paper_pages set ai_status = 'done', answer_key = $2 where paper_id = $1 and page_no = 1`, [sopId, JSON.stringify([{ number: '4', answer: 'b' }])]);
+  const draftOf = async (i: number) => ((await api('GET', `/teacher/papers/${sopId}`, T)).body?.drafts ?? []).find((d: any) => d.id === sopRows.rows[i].id);
+  const keyed = await api('POST', `/teacher/papers/${sopId}/answers`, T);
+  const k4 = await draftOf(3);
+  check('a printed key answers a question that was waiting for a second opinion, and ends the wait',
+    keyed.body?.from_key === 1 && keyed.body?.tried === 0 && k4?.correct_option === 1 && k4?.answer_source === 'key' && k4?.ai_note === null && k4?.ai_picks === null && k4?.ai_votes === null, [keyed.body, k4]);
+  const rw = await api('PATCH', `/teacher/drafts/${sopRows.rows[0].id}`, T, { text: `${tag} so reworded again` });
+  check('rewording a question ends its wait and clears what the checks chose',
+    rw.status === 200 && rw.body?.draft?.ai_votes === null && rw.body?.draft?.ai_picks === null && rw.body?.draft?.ai_note === null, rw.body);
+  const mk2 = await api('PATCH', `/teacher/drafts/${sopRows.rows[1].id}`, T, { correct_option: 2 });
+  check('the tutor marking it ends the wait and the split note',
+    mk2.status === 200 && mk2.body?.draft?.answer_source === 'teacher' && mk2.body?.draft?.ai_votes === null && mk2.body?.draft?.ai_picks === null && mk2.body?.draft?.ai_note === null, mk2.body);
+  const so1 = await api('POST', `/teacher/papers/${sopId}/second-opinion`, T);
+  const k3 = await draftOf(2);
+  check('the second opinion takes only the questions still waiting', so1.status === 200 && so1.body?.tried === 1, so1.body);
+  check('a question asked a second time is finished with, however AI answered', k3?.ai_votes === null, k3);
+  const so2 = await api('POST', `/teacher/papers/${sopId}/second-opinion`, T);
+  check('and nothing is left to ask', so2.status === 200 && so2.body?.tried === 0 && so2.body?.left === 0, so2.body);
+  // With AI on the server: two checks split on a simple sum, and the stronger model settles it.
+  if ((await (await fetch(`${BASE}/`)).json().catch(() => ({}))).ai === true) {
+    const sum = await sdb.query(
+      `insert into paper_drafts (paper_id, page_no, seq, number_label, kind, text, options, answer_checked, ai_note, ai_picks, ai_votes)
+       values ($1, 1, 9, '9', 'mcq', $2, $3, true, 'disagree', '{"solver":1,"checker":2}', $4) returning id`,
+      [sopId, `${tag} What is 2 + 3?`, ['4', '5', '6', '7'], JSON.stringify({ solver: { answer: 1, confidence: 0.95 }, checker: { answer: 2, confidence: 0.95 }, tries: 0 })],
+    );
+    const so3 = await api('POST', `/teacher/papers/${sopId}/second-opinion`, T);
+    const s9 = ((await api('GET', `/teacher/papers/${sopId}`, T)).body?.drafts ?? []).find((d: any) => d.id === sum.rows[0].id);
+    if (so3.status === 200 && so3.body?.by_ai === 1) {
+      check('the second opinion settles a split: two of the three agree, so it is marked and the split note goes',
+        s9?.correct_option === 1 && s9?.answer_source === 'ai' && s9?.ai_note === null && s9?.ai_votes === null && s9?.ai_picks === null, s9);
+    } else {
+      console.log(`      (AI was busy, so the second-opinion check was skipped: ${so3.status} ${JSON.stringify(so3.body)})`);
+    }
+  }
+  await sdb.end();
+
+  // Two answer calls at once take different batches, so no question is worked out twice. Needs AI
+  // on the server being tested (the answers are real, simple sums).
+  if ((await (await fetch(`${BASE}/`)).json().catch(() => ({}))).ai === true) {
+    const par = await api('POST', '/teacher/papers', T, { class_level: 9, subject_id: maths.id, exam_name: `${tag} side by side`, pages: 1 });
+    const parId = par.body?.paper?.id;
+    if (parId) created.papers.push(parId);
+    const pcx = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+    await pcx.connect();
+    for (let i = 0; i < 12; i++) {
+      await pcx.query(
+        `insert into paper_drafts (paper_id, page_no, seq, number_label, kind, text, options) values ($1, 1, $2, $3, 'mcq', $4, $5)`,
+        [parId, i, String(i + 1), `${tag} What is ${i + 2} + ${i + 3}?`, [`${2 * i + 4}`, `${2 * i + 5}`, `${2 * i + 6}`, `${2 * i + 7}`]],
+      );
+    }
+    await pcx.end();
+    const [pa, pb] = await Promise.all([api('POST', `/teacher/papers/${parId}/answers`, T), api('POST', `/teacher/papers/${parId}/answers`, T)]);
+    if (pa.status === 200 && pb.status === 200) {
+      check('two answer calls at once take different batches', pa.body.tried === 6 && pb.body.tried === 6, [pa.body, pb.body]);
+      const after = await api('POST', `/teacher/papers/${parId}/answers`, T);
+      check('and nothing is left for a third', after.status === 200 && after.body?.tried === 0 && after.body?.left === 0, after.body);
+    } else {
+      console.log(`      (AI was busy, so the side-by-side answer check was skipped: ${pa.status} ${pb.status})`);
+    }
+  }
+
+  // From 1.3 a paper is uploaded before its details are known. Answers come from its own key first.
+  const np = await api('POST', '/teacher/papers', T, { pages: 2 });
+  const npId = np.body?.paper?.id;
+  if (npId) created.papers.push(npId);
+  check('a paper can be uploaded before its details are known', np.status === 201 && np.body?.paper?.class_level === null && np.body?.paper?.subject_id === null, np.body);
+  const nd = await api('GET', `/teacher/papers/${npId}`, T);
+  check('the paper says which details are missing, and a name is never one of them: it starts with the date',
+    JSON.stringify(nd.body?.paper?.missing) === '["class_level","subject_id"]' && /^Paper \d{1,2} \w{3}$/.test(nd.body?.paper?.exam_name ?? '') && nd.body?.paper?.name_auto === true, nd.body?.paper);
+  check('its questions cannot be saved without a class', (await api('POST', `/teacher/papers/${npId}/save`, T)).status === 409);
+  check('nor answered without a class', (await api('POST', `/teacher/papers/${npId}/answers`, T)).status === 409);
+  check('nor given a second opinion without a class', (await api('POST', `/teacher/papers/${npId}/second-opinion`, T)).status === 409);
+  // As AI leaves a paper with its answer key on the last page.
+  const kdb = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await kdb.connect();
+  await kdb.query(
+    `insert into paper_drafts (paper_id, page_no, seq, number_label, kind, text, options)
+     values ($1, 1, 0, '1.', 'mcq', $2, $4), ($1, 1, 1, 'Q2', 'mcq', $3, $4)`,
+    [npId, `${tag} keyed one`, `${tag} keyed two`, ['$1$', '$2$', '$3$', '$4$']],
+  );
+  await kdb.query(`update paper_pages set ai_status = 'done', answer_key = $2 where paper_id = $1 and page_no = 2`,
+    [npId, JSON.stringify([{ number: '1', answer: '(c)' }, { number: '2', answer: 'b' }])]);
+  await kdb.end();
+  const category = `${tag} Exemplar`;
+  const dt = await api('PATCH', `/teacher/papers/${npId}`, T, { exam_name: `${tag} keyed`, class_level: 9, subject_id: maths.id, category });
+  check('the teacher fills in the missing details', dt.status === 200 && dt.body?.paper?.missing?.length === 0 && dt.body?.paper?.category === category, dt.body);
+  const an = await api('POST', `/teacher/papers/${npId}/answers`, T);
+  check('answers come from the key printed in the paper, with no AI needed', an.status === 200 && an.body?.from_key === 2 && an.body?.tried === 0 && an.body?.left === 0, an.body);
+  const kd = (await api('GET', `/teacher/papers/${npId}`, T)).body?.drafts ?? [];
+  check('the keyed answers are the right options', JSON.stringify(kd.map((d: any) => [d.correct_option, d.answer_source])) === '[[2,"key"],[1,"key"]]', kd);
+  const mk = await api('PATCH', `/teacher/drafts/${kd[1]?.id}`, T, { correct_option: 3 });
+  check('an answer the teacher changes becomes the teacher\'s own', mk.status === 200 && mk.body?.draft?.answer_source === 'teacher', mk.body);
+  check('the keyed paper saves', (await api('POST', `/teacher/papers/${npId}/save`, T)).body?.saved === 2);
+  const qgroups = (await api('GET', '/teacher/question-groups', T)).body?.groups ?? [];
+  const grp = qgroups.find((x: any) => x.key === `cat:${category}`);
+  check('the category is a question group', grp?.questions === 2 && grp?.papers === 1, qgroups);
+  const gq = await api('GET', `/teacher/questions?group=${encodeURIComponent(`cat:${category}`)}`, T);
+  check('the group lists its questions in paper order',
+    JSON.stringify(gq.body?.questions?.map((x: any) => x.text)) === JSON.stringify([`${tag} keyed one`, `${tag} keyed two`]), gq.body);
+  check('the class stays once questions are saved', (await api('PATCH', `/teacher/papers/${npId}`, T, { class_level: 10 })).status === 409);
+  const pd = await api('DELETE', `/teacher/papers/${npId}`, T);
+  check('deleting a paper deletes the questions saved from it that no test uses', pd.status === 200 && pd.body?.questions_deleted === 2, pd.body);
+
+  // Lockout, PIN reset and deactivation.
+  let last = 0;
+  for (let i = 0; i < 5; i++) last = (await login(`${tag}.two`, '0000')).status;
+  check('fifth wrong PIN locks the login', last === 429);
+  check('right PIN is refused while locked', (await login(`${tag}.two`, '5678')).status === 429);
+  const reset = await api('POST', `/teacher/students/${created.users[1]}/reset-pin`, T, { pin: '2468' });
+  check('teacher resets the PIN', reset.status === 200 && reset.body.login.pin === '2468', reset.body);
+  check('old session stops working after reset', (await api('GET', '/student/home', S2)).status === 401);
+  check('new PIN works and the lock is cleared', (await login(`${tag}.two`, '2468')).status === 200);
+  await api('POST', `/teacher/students/${created.users[0]}/active`, T, { active: false });
+  check('deactivated student cannot log in', (await login(`${tag}.one`, '1234')).status === 403);
+  check('a wrong PIN on a turned-off login does not say it is turned off', (await login(`${tag}.one`, '0000')).status === 401);
+  for (let k = 0; k < 4; k++) await login(`${tag}.one`, '0001');
+  check('and wrong guesses at it lock it like any other login', (await login(`${tag}.one`, '1234')).status === 429);
+  check('deactivated student session stops working', (await api('GET', '/student/home', S1)).status === 401);
+
+  // Deleting: a question nobody has written leaves its tests; a written test goes only when asked twice.
+  const dq = await api('POST', '/teacher/questions', T, { class_level: 9, text: `${tag} delete me`, options: ['a', 'b', 'c', 'd'], correct_option: 0 });
+  created.questions.push(dq.body.id);
+  const delTest = await api('POST', '/teacher/tests', T, { title: `${tag} to delete`, class_level: 9, question_ids: [dq.body.id, created.questions[1]], assign_all: false, assign_group: true });
+  created.tests.push(delTest.body.id);
+  const dqd = await api('DELETE', `/teacher/questions/${dq.body.id}`, T);
+  check('a question in a test nobody has written can be deleted', dqd.status === 200 && dqd.body?.removed_from_tests === 1, dqd.body);
+  check('and that test no longer has it', (await api('GET', `/teacher/tests/${delTest.body.id}`, T)).body?.questions?.length === 1);
+  check('a question in a written test stays', (await api('DELETE', `/teacher/questions/${created.questions[0]}`, T)).status === 409);
+  const delA = await api('DELETE', `/teacher/tests/${A}`, T);
+  check('deleting a written test asks first', delA.status === 409 && delA.body?.error?.code === 'has_attempts', delA.body);
+  const delA2 = await api('DELETE', `/teacher/tests/${A}?with_results=1`, T);
+  check('and then deletes it with its results', delA2.status === 200 && (await api('GET', `/teacher/attempts/${st1.body.attempt.id}`, T)).status === 404, delA2.body);
+  check('a test nobody has written deletes at once', (await api('DELETE', `/teacher/tests/${delTest.body.id}`, T)).status === 200);
+  const sd = await api('POST', '/teacher/students', T, { display_name: 'Test Delete Me', class_level: 9, username: `${tag}.del`, pin: '1357' });
+  const sdd = await api('DELETE', `/teacher/students/${sd.body.student.id}`, T);
+  check('a student can be deleted, and their login stops working', sdd.status === 200 && (await login(`${tag}.del`, '1357')).status !== 200, sdd.body);
+
+  // Two students with one name: the second gets the next free username on its own.
+  const twinIds: string[] = [];
+  const makeTwin = async (username: string) => {
+    const r = await api('POST', '/teacher/students', T, { display_name: 'Zqx Twin', class_level: 9, username, pin: '2222' });
+    if (r.body?.student?.id) twinIds.push(r.body.student.id);
+    return r;
+  };
+  const w1 = await makeTwin('zqx.t');
+  const w2 = await makeTwin('zqx.t');
+  const w3 = await makeTwin('zqx.t.2');
+  check('the first student of a name keeps the suggested username', w1.status === 201 && w1.body?.login?.username === 'zqx.t', w1.body);
+  check('the second gets the next free one', w2.status === 201 && w2.body?.login?.username === 'zqx.t.2', w2.body);
+  check('and the third, the one after', w3.status === 201 && w3.body?.login?.username === 'zqx.t.3', w3.body);
+  check('the app is told the next free username as the name is typed',
+    (await api('GET', '/teacher/username-suggestion?name=Zqx%20Twin', T)).body?.username === 'zqx.t.4');
+  const typed = await api('POST', '/teacher/students', T, { display_name: 'Someone Else', class_level: 9, username: 'zqx.t', pin: '3333' });
+  check('a username typed by hand that is taken is still refused', typed.status === 409 && typed.body?.error?.code === 'username_taken', typed.body);
+  for (const id of twinIds) await api('DELETE', `/teacher/students/${id}`, T);
+
+  // The developer's admin app (skipped where there is no developer login in the logins file).
+  if (logins.developer) {
+    const dv = await login(logins.developer.username, logins.developer.password);
+    check('developer logs in', dv.status === 200 && dv.body?.user?.role === 'developer', dv.body);
+    const D = dv.body.token as string;
+    check('the developer cannot open teacher pages', (await api('GET', '/teacher/dashboard', D)).status === 403);
+    check('the teacher cannot open the admin app', (await api('GET', '/admin/overview', T)).status === 403);
+    // A student logs in from a phone that says what it is, as the app does from 1.2.1.
+    const phone = { 'x-install-id': `${tag}-phone-a`, 'x-app': 'tuition_app/1.2.1+4', 'x-device': 'samsung SM-M146B', 'x-os': 'Android 14 (SDK 34)' };
+    const p1 = await api('POST', '/auth/login', undefined, { username: `${tag}.two`, secret: '2468' }, phone);
+    check('a student logs in from a phone that reports itself', p1.status === 200, p1.body);
+    const P1 = p1.body?.token as string;
+    await api('POST', '/auth/login', undefined, { username: `${tag}.two`, secret: '0000' }, phone);
+    const acct = await api('GET', `/admin/people/${created.users[1]}`, D);
+    const ph = acct.body?.phones?.find((x: any) => x.install_id === phone['x-install-id']);
+    check('the admin app shows the phone and its app version',
+      ph?.model === 'samsung SM-M146B' && ph?.app_version === '1.2.1' && ph?.signed_in === true, acct.body?.phones);
+    check('the login history has the right and the wrong PIN',
+      ['ok', 'wrong_secret'].every((o) => acct.body?.logins?.some((e: any) => e.outcome === o)), acct.body?.logins);
+    const ov = await api('GET', '/admin/overview', D);
+    check('the overview counts people and phones',
+      ov.status === 200 && ov.body?.people?.accounts > 0 && ov.body?.phones?.phones > 0 && typeof ov.body?.compute?.cu_hours === 'number', ov.body);
+    const so = await api('POST', `/admin/people/${created.users[1]}/sign-out`, D, { install_id: phone['x-install-id'] });
+    check('the developer signs that phone out', so.status === 200 && so.body?.signed_out === 1, so.body);
+    check('the phone is signed out', (await api('GET', '/student/home', P1)).status === 401);
+    for (let i = 0; i < 5; i++) await login(`${tag}.two`, '0000');
+    const un = await api('POST', `/admin/people/${created.users[1]}/unlock`, D);
+    check('the developer unlocks a locked login', un.status === 200 && (await login(`${tag}.two`, '2468')).status === 200, un.body);
+    const srv = await api('GET', '/admin/server', D);
+    check('the server page measures the database and storage',
+      srv.status === 200 && srv.body?.database?.bytes > 0 && typeof srv.body?.storage?.files === 'number', srv.body?.database);
+    const lg = await api('GET', '/admin/log', D);
+    check('the log lists recent logins', lg.status === 200 && lg.body?.events?.some((e: any) => e.kind === 'login'), lg.body?.events?.slice(0, 3));
+    // Clients: a tuition each, how much it uses the API, what its AI use is worth. Students appear only as numbers.
+    await new Promise((ok) => setTimeout(ok, 1500)); // the request counts are written just after each reply
+    const cl = await api('GET', '/admin/clients', D);
+    const mine = cl.body?.clients?.find((x: any) => x.id === FIRST_TUITION);
+    check('the admin app lists the clients with their size and use',
+      cl.status === 200 && cl.body?.totals?.clients >= 1 && mine?.students > 0 && typeof mine?.ai?.cost_month_inr === 'number', cl.body?.totals);
+    check('the requests made so far were counted against their client', mine?.requests?.today > 0 && mine?.requests?.total >= mine?.requests?.today, mine?.requests);
+    const one = await api('GET', `/admin/clients/${FIRST_TUITION}`, D);
+    check('one client has its days, AI lines, tutors and classes',
+      one.status === 200 && Array.isArray(one.body?.requests?.days) && Array.isArray(one.body?.ai?.lines) && one.body?.tutors?.length > 0 && Array.isArray(one.body?.classes),
+      Object.keys(one.body ?? {}));
+    check('no student is named on the client pages', !JSON.stringify([cl.body, one.body]).includes('Test Student'), 'a test student appeared');
+    check('a client that does not exist is a 404', (await api('GET', '/admin/clients/00000000-0000-4000-8000-0000000000ff', D)).status === 404);
+    check('the teacher cannot open the clients', (await api('GET', '/admin/clients', T)).status === 403);
+    check('the overview counts the clients and what AI cost', ov.body?.clients?.total >= 1 && typeof ov.body?.ai_cost?.month_inr === 'number', [ov.body?.clients, ov.body?.ai_cost]);
+    await api('POST', '/auth/logout', D);
+  }
+  // Each run's teacher login would otherwise stay signed in, and count as another phone.
+  await api('POST', '/auth/logout', T);
+} catch (e) {
+  fail++;
+  console.log('FAIL  unexpected error:', e);
+} finally {
+  const db = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await db.connect();
+  await db.query('delete from tests where id = any($1::uuid[])', [created.tests]);
+  await db.query('delete from questions where id = any($1::uuid[]) or paper_id = any($2::uuid[])', [created.questions, created.papers]);
+  await db.query('delete from papers where id = any($1::uuid[])', [created.papers]);
+  await db.query('delete from app_installs where install_id like $1', [`${tag}-%`]);
+  await db.query('delete from users where id = any($1::uuid[])', [[...created.users, ...created.tutors.filter(Boolean)]]);
+  await db.query('delete from subjects where id = any($1::uuid[])', [created.subjects]);
+  const groupsNow = (await db.query('select id, class_level, subject_id from groups where tuition_id = $1', [FIRST_TUITION])).rows;
+  const extra = groupsNow.filter((g) => !groupsBefore.has(`${g.class_level}:${g.subject_id}`)).map((g) => g.id);
+  if (extra.length) await db.query('delete from groups where id = any($1::uuid[])', [extra]);
+  await db.end();
+  console.log(`\n${pass} passed, ${fail} failed (test data removed)`);
+  process.exit(fail ? 1 : 0);
+}

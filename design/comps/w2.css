@@ -1,0 +1,133 @@
+/* Comps for the simpler tutor app and for making several tests at once (2026-10-27).
+   Builds on tokens.css + comp.css + v12.css + v14.css + w1.css + c1.css.
+   Sample data only: every name, number and time on these screens is made up. */
+
+/* ---- header with one labelled add button */
+.hdr4{padding-top:14px}
+.hdr4 .trow{display:flex;align-items:flex-end;gap:10px;margin-top:7px}
+.hdr4 .trow .display{flex:1;min-width:0}
+.hdr4 .trow .add{margin-bottom:5px}
+.hdr4 .trow .av.lg{margin-bottom:3px}
+
+/* ---- Home: the one big action, always in the same place */
+.mk{margin-top:18px}
+.mk .btn{height:58px;font-size:16px;border-radius:16px}
+.mk .btn i{font-size:21px}
+.mk .reason{margin-top:10px}
+
+/* ---- Home: something that needs the tutor, one line each */
+.need{display:flex;align-items:center;gap:14px;padding:14px 16px;background:var(--surface);border-radius:20px;box-shadow:var(--e1)}
+:root[data-theme="dark"] .need{border:1px solid var(--hair)}
+.need .ic{width:42px;height:42px;border-radius:13px;background:var(--wn-soft);color:var(--wn);display:grid;place-items:center;font-size:21px;flex:none}
+.need .ic.ai{background:var(--accent-soft);color:var(--accent)}
+.need .t{font-size:14.5px;font-weight:600;letter-spacing:-.026em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---- two tabs: a narrower bar */
+.navbar.two{left:76px;right:76px}
+
+/* ---- the steps of making tests */
+.steps{display:flex;gap:6px;margin-top:16px}
+.steps i{flex:1;height:4px;border-radius:4px;background:var(--hair)}
+:root[data-theme="dark"] .steps i{background:#2A2A33}
+.steps i.on{background:var(--ink)}
+.lead{margin-top:10px;font-size:13.8px;font-weight:500;letter-spacing:-.022em;line-height:1.54;color:var(--muted)}
+
+/* ---- which class: one choice, a ring that fills */
+.pick.one{padding:14px 17px}
+.pick.one .ck{border-radius:999px}
+.pick.one.on{box-shadow:var(--e2)}
+
+/* ---- adding papers */
+.bigadd{margin-top:20px;display:flex;flex-direction:column;gap:10px}
+.bigadd .btn{height:56px;font-size:15.5px}
+.bigadd .btn.soft{height:50px;margin-top:0;font-size:14.5px}
+.alt{display:flex;align-items:center;justify-content:center;gap:7px;margin-top:16px;font-size:13px;font-weight:600;letter-spacing:-.02em;color:var(--muted)}
+.alt i{font-size:16px;color:var(--accent)}
+.alt b{font-weight:700;color:var(--ink)}
+.prow .x{margin-left:auto;width:32px;height:32px;border-radius:999px;background:var(--sunk);display:grid;place-items:center;color:var(--muted);font-size:15px;flex:none}
+.prow .pdf{width:38px;height:46px;border-radius:9px;background:var(--sunk);display:grid;place-items:center;color:var(--muted);font-size:20px;flex:none}
+.prow .t.one{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prow .grow{min-width:0}
+
+/* ---- choosing the days */
+.dayrow{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 17px;background:var(--surface);border-radius:20px;box-shadow:var(--e1)}
+:root[data-theme="dark"] .dayrow{border:1px solid var(--hair)}
+.dayrow .t{font-size:14.5px;font-weight:600;letter-spacing:-.026em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dayrow .s{font-size:11.5px;font-weight:600;color:var(--muted);margin-top:2px;letter-spacing:-.005em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dayrow .s.wn{color:var(--wn)}
+.dayrow .sel{flex:none;height:38px}
+.same{display:flex;align-items:center;gap:14px;padding:14px 16px;border-radius:20px;background:var(--sunk)}
+.same .ic{font-size:22px;color:var(--muted);flex:none}
+.same .t{font-size:13.5px;font-weight:600;letter-spacing:-.022em;color:var(--ink)}
+.same .s{font-size:11.5px;font-weight:600;color:var(--muted);margin-top:3px;line-height:1.4}
+.same .textact{margin-left:auto;flex:none}
+.startrow{display:flex;align-items:center;gap:12px;margin-top:18px}
+.startrow .lab{font-size:13.8px;font-weight:600;letter-spacing:-.022em;color:var(--ink);flex:1}
+.startrow .sel{height:40px}
+
+/* ---- one paper's options, in a centred card */
+.choice.opts{max-height:none;padding-bottom:16px}
+.choice.opts .cardfld{padding:0 22px;margin-top:8px}
+.choice.opts .flabel{margin-bottom:7px}
+.choice.opts .fld{padding:13px 16px;font-size:14.5px;border-radius:15px;background:var(--sunk);box-shadow:none}
+:root[data-theme="dark"] .choice.opts .fld{border:0}
+.fsel{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.fsel i{font-size:14px;color:var(--faint)}
+.fpair{display:flex;gap:10px}
+.fpair > div{flex:1;min-width:0}
+.fnote{font-size:11.5px;font-weight:600;color:var(--muted);margin-top:7px;line-height:1.4}
+.chips2{display:flex;gap:8px}
+.chips2 .sel{height:38px;box-shadow:none;background:var(--sunk)}
+.chips2 .sel.on{background:var(--action)}
+.choice.opts .btns{padding:18px 22px 0}
+.choice.opts .btns .btn{height:50px}
+.choice.opts .tl{display:flex;justify-content:center;margin-top:14px}
+
+/* ---- reading and posting: rows that carry a state */
+.prow .tag{margin-left:auto;flex:none}
+.prow .go{margin-left:10px;color:var(--faint);font-size:16px}
+.prow .st.ok{color:var(--ok)}
+.prow .st.ai{color:var(--accent)}
+.rwhole{background:var(--surface);border-radius:26px;box-shadow:var(--e3);padding:20px}
+:root[data-theme="dark"] .rwhole{border:1px solid var(--hair)}
+.rwhole .big{font-family:var(--mono);font-size:40px;font-weight:700;letter-spacing:-.04em;line-height:1;color:var(--ink);margin-top:12px}
+.rwhole .big .u{font-family:var(--sans);font-size:16px;font-weight:600;letter-spacing:-.02em;color:var(--muted);margin-left:8px}
+.rwhole .bod{margin-top:12px;color:var(--muted)}
+.rwhole .bod .num{color:var(--body);font-weight:600}
+
+/* ---- the days laid out */
+.dayc{width:46px;flex:none;text-align:center}
+.dayc b{display:block;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
+.dayc span{display:block;font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:-.04em;color:var(--ink);margin-top:2px}
+.dayc.today span{color:var(--ink)}
+.prow .t .num{font-weight:600}
+
+/* ---- done */
+.okhero{display:flex;flex-direction:column;align-items:center;text-align:center;padding:30px 28px 0}
+.okhero .ic{width:76px;height:76px;border-radius:999px;background:var(--ok-soft);display:grid;place-items:center;font-size:34px;color:var(--ok)}
+.okhero .et{margin-top:18px;font-size:23px;font-weight:800;letter-spacing:-.04em;color:var(--ink)}
+.okhero .eb{margin-top:8px;font-size:13.8px;font-weight:500;letter-spacing:-.022em;line-height:1.54;color:var(--muted)}
+
+/* ---- the group page, shorter */
+.more{display:flex;justify-content:center;margin-top:10px}
+.stn{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:var(--muted);letter-spacing:-.01em;margin-top:12px}
+.stn i{font-size:15px;color:var(--faint)}
+
+/* ---- a paper that is read but has questions waiting for the tutor */
+.sring.wn{border-color:var(--wn)}
+.sring.wn::after{content:"";width:7px;height:7px;border-radius:999px;background:var(--wn)}
+
+/* ---- dark mode: the filled step bars and the coloured rings win over the generic dark rules */
+:root[data-theme="dark"] .steps i.on{background:var(--ink)}
+:root[data-theme="dark"] .sring.wn{border-color:var(--wn)}
+:root[data-theme="dark"] .sring.ai{border-color:var(--accent)}
+
+/* ---- a one-line summary instead of a card, where the list matters more */
+.brief{display:flex;align-items:center;gap:10px;margin-top:16px;font-size:13.8px;font-weight:600;letter-spacing:-.022em;color:var(--ink)}
+.brief .dot{width:9px;height:9px;border-radius:999px;background:var(--ok);flex:none}
+.brief .dot.wn{background:var(--wn)}
+.brief > span{color:var(--muted);font-weight:500}
+
+/* ---- a date in a row's trailing figure: words in the sans face, only the digits in the mono face, as the app draws it */
+.dt{font-size:15px;font-weight:700;letter-spacing:-.03em;color:var(--ink);white-space:nowrap}
+.dt .num{font-weight:700}

@@ -1,0 +1,122 @@
+import 'package:intl/intl.dart';
+
+DateTime? parseTime(Object? v) => v == null ? null : DateTime.tryParse('$v')?.toLocal();
+
+/// "7:58 am", with a no-break space so "am" never wraps onto a line of its own.
+String time(DateTime t) => '${DateFormat('h:mm').format(t)} ${t.hour < 12 ? 'am' : 'pm'}';
+
+/// "now", "4 min ago", "2 h ago", "today 7:58 am", "yesterday 8:14 pm", "Sat 6:40 pm", "26 Sep".
+String ago(DateTime? t, {DateTime? now}) {
+  if (t == null) return 'never';
+  final n = now ?? DateTime.now();
+  final d = n.difference(t);
+  if (d.inSeconds < 90) return 'now';
+  if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+  if (d.inHours < 4) return '${d.inHours} h ago';
+  final today = DateTime(n.year, n.month, n.day);
+  final day = DateTime(t.year, t.month, t.day);
+  if (day == today) return 'today ${time(t)}';
+  if (day == DateTime(n.year, n.month, n.day - 1)) return 'yesterday ${time(t)}';
+  if (d.inDays < 7) return '${DateFormat('EEE').format(t)} ${time(t)}';
+  return DateFormat(t.year == n.year ? 'd MMM' : 'd MMM y').format(t);
+}
+
+/// "3 Oct, 6:12 pm"
+String when(DateTime? t) => t == null ? '-' : '${DateFormat('d MMM').format(t)}, ${time(t)}';
+
+/// "7:58 am", or "3 Oct" when not today.
+String clock(DateTime? t) {
+  if (t == null) return '-';
+  final n = DateTime.now();
+  if (t.year == n.year && t.month == n.month && t.day == n.day) return time(t);
+  return DateFormat('d MMM').format(t);
+}
+
+/// "Today", "Yesterday", "Sat 3 October", or "3 October 2025" in another year.
+String dayLabel(DateTime t) {
+  final n = DateTime.now();
+  final d = DateTime(t.year, t.month, t.day);
+  if (d == DateTime(n.year, n.month, n.day)) return 'Today';
+  if (d == DateTime(n.year, n.month, n.day - 1)) return 'Yesterday';
+  return DateFormat(t.year == n.year ? 'EEE d MMMM' : 'd MMMM y').format(t);
+}
+
+String bytes(num b) {
+  if (b < 1024) return '$b B';
+  if (b < 1024 * 1024) return '${(b / 1024).round()} KB';
+  if (b < 1024 * 1024 * 1024) return '${(b / 1024 / 1024).toStringAsFixed(b < 10 * 1024 * 1024 ? 1 : 0)} MB';
+  return '${(b / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
+}
+
+/// A size kept in storage as a figure and its unit: ("412", "MB"), ("1.7", "GB"), ("2", "GB"). A decimal only where it says something.
+(String, String) sizeParts(num b) {
+  const kb = 1024, mb = 1024 * 1024, gb = 1024 * 1024 * 1024;
+  if (b < kb) return ('${b.round()}', 'B');
+  if (b < mb) return ('${(b / kb).round()}', 'KB');
+  if (b < gb) return ((b / mb).toStringAsFixed(b < 10 * mb ? 1 : 0), 'MB');
+  final g = b / gb;
+  final tenths = (g * 10).round() / 10;
+  return (tenths == tenths.roundToDouble() ? '${tenths.round()}' : tenths.toStringAsFixed(1), 'GB');
+}
+
+/// "412 MB", "1.7 GB", "2 GB".
+String size(num b) {
+  final (figure, unit) = sizeParts(b);
+  return '$figure $unit';
+}
+
+final _indian = NumberFormat.decimalPattern('en_IN');
+
+/// 1,204 and 1,00,000: Indian grouping.
+String count(num n) => _indian.format(n);
+
+String plural(num n, String one, [String? many]) => '${count(n)} ${n == 1 ? one : (many ?? '${one}s')}';
+
+/// Negative when version [a] is older than [b], zero when they are the same, positive when newer ("1.10.0" is newer than "1.9.2").
+int compareVersions(String a, String b) {
+  final x = a.split('.').map((p) => int.tryParse(p) ?? 0).toList();
+  final y = b.split('.').map((p) => int.tryParse(p) ?? 0).toList();
+  for (var i = 0; i < (x.length > y.length ? x.length : y.length); i++) {
+    final d = (i < x.length ? x[i] : 0) - (i < y.length ? y[i] : 0);
+    if (d != 0) return d;
+  }
+  return 0;
+}
+
+int asInt(Object? v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
+double asDouble(Object? v) => v is num ? v.toDouble() : double.tryParse('$v') ?? 0;
+
+final _rupees2 = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 2);
+final _rupees0 = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+
+/// ₹12.40, and ₹1,234 from a thousand up, where paise are noise.
+String rupees(num n) => n >= 1000 ? _rupees0.format(n) : _rupees2.format(n);
+
+/// 840, 12.4k, 1.2M: a token count at a glance.
+String tokens(num n) {
+  if (n < 1000) return '${n.round()}';
+  if (n < 1000000) return '${(n / 1000).toStringAsFixed(n < 10000 ? 1 : 0)}k';
+  return '${(n / 1000000).toStringAsFixed(1)}M';
+}
+
+/// ₹80.40, ₹1,000.00: an amount of AI credit, given in paise, always with its paise.
+String inr(int paise) => _rupees2.format(paise / 100);
+
+/// Rupees typed by hand ("250", "250.5", "1,000.25", "₹99") as paise, read digit by digit so no amount is ever rounded;
+/// null when the text is not an amount of rupees with at most two decimals.
+int? paiseOf(String text) {
+  final t = text.replaceAll(',', '').replaceAll('₹', '').trim();
+  final m = RegExp(r'^(\d{1,7})(?:\.(\d{0,2}))?$').firstMatch(t);
+  if (m == null) return null;
+  final frac = m.group(2) ?? '';
+  return int.parse(m.group(1)!) * 100 + (frac.isEmpty ? 0 : int.parse(frac.padRight(2, '0')));
+}
+
+/// "Today, 5:12 pm", "Yesterday", "Tue 7 Oct", "7 Oct 2025": when a line of credit happened.
+String lineWhen(DateTime t) {
+  final n = DateTime.now();
+  final d = DateTime(t.year, t.month, t.day);
+  if (d == DateTime(n.year, n.month, n.day)) return 'Today, ${time(t)}';
+  if (d == DateTime(n.year, n.month, n.day - 1)) return 'Yesterday';
+  return DateFormat(t.year == n.year ? 'EEE d MMM' : 'd MMM y').format(t);
+}

@@ -1,0 +1,217 @@
+import { pool } from './db.ts';
+import { geminiChat, geminiConfigured, isGemini } from './gemini.ts';
+import { HttpError } from './http.ts';
+import { fixLatexEscapes } from './latex-json.ts';
+
+// One chat() for both providers: models named gemini-* go to Google (lib/gemini.ts), the rest to
+// Groq. Groq keys rotate per call, starting at a random one so a fresh server does not always lean
+// on the first. A 429 or 5xx moves on to another key, then to the next model. Groq's limits are per
+// account (organisation), not per key: keys made in one account share one budget, so after a few
+// tries on a rate limit there is no point trying the rest.
+const keys = (process.env.GROQ_API_KEYS ?? '').split(',').map((k) => k.trim()).filter(Boolean);
+let next = Math.floor(Math.random() * Math.max(keys.length, 1));
+const TRIES_PER_MODEL = 2;
+
+const list = (v: string | undefined, fallback: string) => (v ?? fallback).split(',').map((s) => s.trim()).filter(Boolean);
+// Pages are read by Gemini when its key is set, with Groq's vision model behind it.
+export const VISION_MODELS = list(process.env.GROQ_VISION_MODELS, `${geminiConfigured() ? 'gemini-3.5-flash-lite,' : ''}qwen/qwen3.8-27b`);
+// Each question is checked by models of two different families, each working it out on its own and listing every option it finds
+// correct (see `solve` in routes/papers.ts; `verdict` in lib/votes.ts says what their answers add up to). They were chosen by
+// running 165 questions an AI had written (140 sound, 25 faulty, each judged by hand) through the candidates:
+//  - gpt-oss-120b was right on 32 of 33 sound questions outside Hindi and Tamil and on 8 of 12 in them, answers in a second or two at
+//    any hour, and is good at seeing that a maths question's options lack the right value. gpt-oss-20b is the same family and about
+//    as good (98 of 102, 26 of 38), so it only stands in when the 120b has used its day's allowance.
+//  - Gemini Flash-Lite was right on 138 of 140 sound questions, Hindi and Tamil included, which is what gpt-oss does not know; but it
+//    let 12 of the 25 faulty ones through, most of them maths questions whose options lack the right value. The two together blocked
+//    24 of the 25 faulty questions, where two gpt-oss models together blocked 16 and let 6 to 9 through as sound.
+//  - From the evening on Flash-Lite answers one call in three with "high demand" or takes 30 to 60 seconds. A check that is down costs
+//    the question a later second look (two models of one family are never enough), not a wrong answer.
+export const SOLVE_MODELS = list(process.env.GROQ_SOLVE_MODELS, 'openai/gpt-oss-120b,openai/gpt-oss-20b');
+// The chat writes a test with Gemini first and gpt-oss-120b behind it. Its answers are then checked
+// again by the models above, which never see the writer's answer.
+export const WRITE_MODELS = list(
+  process.env.GROQ_WRITE_MODELS,
+  geminiConfigured() ? 'gemini-3.1-flash-lite,openai/gpt-oss-120b' : 'openai/gpt-oss-120b',
+);
+// Flash-Lite 3.1 first: Flash-Lite 3.5 reads the pages (VISION_MODELS) and shares its per-minute allowance with that. Qwen is only a
+// stand-in: Groq's free plan gives it about 1000 output tokens a minute, so it answers one batch a minute at best.
+export const CHECK_MODELS = list(
+  process.env.GROQ_CHECK_MODELS,
+  geminiConfigured() ? 'gemini-3.1-flash-lite,gemini-3.5-flash-lite,qwen/qwen3.8-27b' : 'qwen/qwen3.8-27b',
+);
+
+// A question the solver and the checker split over, or only one of them could be heard on, is put to a stronger model and marked when
+// the opinions add up. Gemini 3.5 Flash was the best checker we tried (it never disputed a right answer), but its free plan allows only
+// 20 requests a day; 3.6 Flash allows 5 a minute, and Qwen is the last stand-in. With none of them left the tutor decides.
+export const TIEBREAK_MODELS = list(
+  process.env.GROQ_TIEBREAK_MODELS,
+  geminiConfigured() ? 'gemini-3.5-flash,gemini-3.6-flash,gemini-3.5-flash-lite,gemini-3.1-flash-lite,qwen/qwen3.8-27b' : 'qwen/qwen3.8-27b',
+);
+
+export type Content = string | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }>;
+export type ChatMessage = { role: 'system' | 'user' | 'assistant'; content: Content };
+
+export type ChatOptions = {
+  task: string;
+  userId: string | null;
+  /** The tuition the call is for: its cost is told per tuition, and its day's allowance is counted here. */
+  tuitionId: string;
+  models: string[];
+  messages: ChatMessage[];
+  json?: boolean;
+  maxTokens?: number;
+  temperature?: number;
+  /** How hard the model thinks before answering; solving questions wants more than reading them. */
+  reasoning?: 'low' | 'medium' | 'high';
+  /**
+   * When the call must be over (a Date.now() value). No attempt starts too close to it and one that is running
+   * is cut off at it, so help that is only a bonus cannot keep anyone waiting for a slow or busy model.
+   */
+  deadline?: number;
+};
+
+/** An attempt that would have less time than this is not started. */
+const MIN_ATTEMPT_MS = 1500;
+
+function modelParams(model: string, reasoning: ChatOptions['reasoning']): Record<string, unknown> {
+  if (model.startsWith('openai/gpt-oss')) return { include_reasoning: false, reasoning_effort: reasoning ?? 'low' };
+  if (model.startsWith('qwen/')) {
+    // "default" is Qwen answering without thinking (it got a fifth of the maths questions wrong, which "medium" gets right):
+    // a task that wants real reasoning says so, and the ones that only read a page keep the cheap setting.
+    const thinks = reasoning === 'medium' || reasoning === 'high';
+    return { reasoning_format: 'hidden', reasoning_effort: thinks ? reasoning : reasoning ? 'default' : 'none' };
+  }
+  return {};
+}
+
+async function logUsage(row: {
+  userId: string | null; tuitionId: string; task: string; model: string; slot: number | null;
+  prompt?: number; completion?: number; ok: boolean; error?: string; ms: number;
+}) {
+  await pool
+    .query(
+      `insert into ai_usage (user_id, tuition_id, task, model, key_slot, prompt_tokens, completion_tokens, ok, error, ms)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [row.userId, row.tuitionId, row.task, row.model, row.slot, row.prompt ?? null, row.completion ?? null, row.ok, row.error ?? null, row.ms],
+    )
+    .catch(() => {});
+}
+
+/**
+ * AI calls one tuition may make in a day, failed ones too (they use the providers' free quota just the same).
+ * A sign-up is open to anyone, so without a ceiling one account could use up the day's quota for everybody.
+ * A tutor who really does 500 calls a day (some forty papers) is far beyond what anyone needs.
+ */
+const DAILY_CALLS = Number(process.env.AI_DAILY_CALLS) || 500;
+
+async function usedToday(tuitionId: string): Promise<number> {
+  const r = await pool.query<{ n: string }>(`select count(*) as n from ai_usage where tuition_id = $1 and created_at > now() - interval '1 day'`, [tuitionId]);
+  return Number(r.rows[0]?.n ?? 0);
+}
+
+export const aiConfigured = () => keys.length > 0 || geminiConfigured();
+const usable = (model: string) => (isGemini(model) ? geminiConfigured() : keys.length > 0);
+
+export async function chat(opts: ChatOptions): Promise<{ content: string; model: string }> {
+  const models = opts.models.filter(usable);
+  if (!models.length) throw new HttpError(503, 'ai_not_configured', 'AI is not set up on the server yet.');
+  // When the count cannot be read the call is not made: the app treats that like AI being busy and tries again.
+  let used: number;
+  try {
+    used = await usedToday(opts.tuitionId);
+  } catch {
+    throw new HttpError(503, 'ai_busy', 'AI could not be reached right now. Try again in a minute.');
+  }
+  if (used >= DAILY_CALLS) {
+    throw new HttpError(429, 'ai_limit', 'This tuition has used all the AI it gets in a day. It works again tomorrow.');
+  }
+  let retryAfter: number | null = null;
+  const timeLeft = () => (opts.deadline === undefined ? Infinity : opts.deadline - Date.now());
+
+  for (const model of models) {
+    if (timeLeft() < MIN_ATTEMPT_MS) break;
+    if (isGemini(model)) {
+      // "High demand" (503) on Google's side passes in seconds, and so does the free plan's
+      // per-minute limit (it says how long: a few seconds when pages are read side by side).
+      // The models behind this one are weaker, so it gets one more try before they do. A limit
+      // that lasts longer, such as a day's quota, goes straight on to them.
+      for (let tries = 0; tries < 2; tries++) {
+        if (timeLeft() < MIN_ATTEMPT_MS) break;
+        const started = Date.now();
+        const r = await geminiChat(model, opts);
+        await logUsage({
+          userId: opts.userId, tuitionId: opts.tuitionId, task: opts.task, model, slot: null, ok: r.ok, error: r.ok ? undefined : r.error,
+          prompt: r.prompt, completion: r.completion, ms: Date.now() - started,
+        });
+        if (r.ok) return { content: r.content, model };
+        if (r.retryAfter) retryAfter = Math.min(retryAfter ?? r.retryAfter, r.retryAfter);
+        const brief = r.error.startsWith('503') ? 2 : r.retryAfter !== undefined && r.retryAfter <= 10 ? r.retryAfter + 0.5 : null;
+        if (brief === null || tries > 0) break;
+        await new Promise((ok) => setTimeout(ok, brief * 1000));
+      }
+      continue;
+    }
+    for (let tries = 0; tries < Math.min(keys.length, TRIES_PER_MODEL); tries++) {
+      if (timeLeft() < MIN_ATTEMPT_MS) break;
+      const slot = next++ % keys.length;
+      const started = Date.now();
+      let res: Response;
+      try {
+        res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+          method: 'POST',
+          headers: { authorization: `Bearer ${keys[slot]}`, 'content-type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: opts.messages,
+            temperature: opts.temperature ?? 0,
+            max_completion_tokens: opts.maxTokens ?? 4096,
+            ...(opts.json ? { response_format: { type: 'json_object' } } : {}),
+            ...modelParams(model, opts.reasoning),
+          }),
+          signal: AbortSignal.timeout(Math.min(120_000, timeLeft())),
+        });
+      } catch (e) {
+        await logUsage({ userId: opts.userId, tuitionId: opts.tuitionId, task: opts.task, model, slot, ok: false, error: String(e), ms: Date.now() - started });
+        continue;
+      }
+      const ms = Date.now() - started;
+      if (res.ok) {
+        let j: any;
+        try {
+          j = await res.json();
+        } catch (e) {
+          // Cut off while the reply was coming in, or not JSON: the next key or model gets the question.
+          await logUsage({ userId: opts.userId, tuitionId: opts.tuitionId, task: opts.task, model, slot, ok: false, error: String(e), ms: Date.now() - started });
+          continue;
+        }
+        await logUsage({
+          userId: opts.userId, tuitionId: opts.tuitionId, task: opts.task, model, slot, ok: true, ms,
+          prompt: j.usage?.prompt_tokens, completion: j.usage?.completion_tokens,
+        });
+        return { content: j.choices?.[0]?.message?.content ?? '', model };
+      }
+      const body = (await res.text().catch(() => '')).slice(0, 500);
+      await logUsage({ userId: opts.userId, tuitionId: opts.tuitionId, task: opts.task, model, slot, ok: false, error: `${res.status} ${body}`, ms });
+      if (res.status === 429 || res.status >= 500) {
+        const ra = Number(res.headers.get('retry-after'));
+        if (Number.isFinite(ra) && ra > 0) retryAfter = Math.min(retryAfter ?? ra, ra);
+        continue; // next key
+      }
+      if (res.status === 401 || res.status === 403) continue; // this key is bad; try the other one
+      break; // 400/404 for this model (e.g. withdrawn): move to the next model
+    }
+  }
+  throw new HttpError(
+    503,
+    'ai_busy',
+    retryAfter
+      ? `AI is busy right now. Try again in about ${Math.ceil(retryAfter)} second${Math.ceil(retryAfter) === 1 ? '' : 's'}.`
+      : 'AI could not read this right now. Try again in a minute.',
+  );
+}
+
+/** Parses a model's JSON reply, tolerating a stray code fence and LaTeX written with a single backslash. */
+export function parseJson<T>(text: string): T {
+  const cleaned = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+  return JSON.parse(fixLatexEscapes(cleaned)) as T;
+}

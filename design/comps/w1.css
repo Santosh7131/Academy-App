@@ -1,0 +1,166 @@
+/* Comps for AI credit, stage 1 (2026-10-10). Builds on tokens.css + comp.css + v12.css + v14.css.
+   Sample data only: every name, amount, code and UPI id on these screens is made up. */
+
+/* ---- header with the balance: kicker on its own line, then the title with the pill and the avatar */
+.hdr3{padding-top:14px}
+.hdr3 .trow{display:flex;align-items:flex-end;gap:10px;margin-top:7px}
+.hdr3 .trow .display{flex:1;min-width:0}
+.hdr3 .trow .cpill{margin-bottom:4px}
+.hdr3 .trow .av.lg{margin-bottom:3px}
+
+/* ---- the balance as a pill: neutral, amber when low, red when empty */
+.cpill{height:36px;padding:0 13px 0 11px;border-radius:999px;display:inline-flex;align-items:center;gap:6px;background:var(--surface);box-shadow:var(--e1);color:var(--ink);flex:none}
+.cpill i{font-size:16px;color:var(--muted)}
+.cpill .num{font-size:13.5px;font-weight:700;letter-spacing:-.03em}
+.cpill.low{background:var(--wn-soft);color:var(--wn);box-shadow:none}
+.cpill.low i{color:var(--wn)}
+.cpill.zero{background:var(--od-soft);color:var(--od);box-shadow:none}
+.cpill.zero i{color:var(--od)}
+:root[data-theme="dark"] .cpill:not(.low):not(.zero){border:1px solid var(--hair)}
+
+/* ---- the AI credit screen */
+.bal .lab{font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:-.01em}
+.bal .big{font-family:var(--mono);font-size:46px;font-weight:700;letter-spacing:-.045em;line-height:1;color:var(--ink);margin-top:10px}
+.bal .facts{margin-top:12px}
+.bal .facts .dot{font-family:var(--sans);font-weight:600}
+.lrow .price{font-family:var(--mono);font-size:15px;font-weight:700;letter-spacing:-.04em;color:var(--ink);flex:none}
+.leds{display:flex;flex-direction:column;gap:8px}
+.led{display:flex;align-items:center;gap:14px;padding:13px 17px;background:var(--surface);border-radius:20px;box-shadow:var(--e1)}
+:root[data-theme="dark"] .led{border:1px solid var(--hair)}
+.led .t{font-size:14px;font-weight:600;letter-spacing:-.026em;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.led .lamt{font-family:var(--mono);font-size:14.5px;font-weight:700;letter-spacing:-.04em;color:var(--ink);flex:none}
+.led .lamt.plus{color:var(--ok)}
+
+/* ---- add credit: four amounts, then how to pay */
+.amts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.amtile{background:var(--surface);border-radius:20px;box-shadow:var(--e1);padding:13px 16px 12px;text-align:left;display:flex;flex-direction:column;gap:4px;min-height:68px}
+:root[data-theme="dark"] .amtile{border:1px solid var(--hair)}
+.amtile .v{font-size:22px;font-weight:700;letter-spacing:-.04em;color:var(--ink)}
+.amtile .s{font-size:11.5px;font-weight:600;color:var(--muted);letter-spacing:-.005em}
+.amtile.on{background:var(--action);box-shadow:var(--e4)}
+:root[data-theme="dark"] .amtile.on{border-color:#3A3A46}
+.amtile.on .v{color:var(--action-ink)}
+.amtile.on .s{color:var(--action-ink);opacity:.72}
+.step{display:flex;gap:14px;padding:13px 17px;align-items:flex-start}
+.step + .step{border-top:1px solid var(--hair)}
+.step .sn{width:24px;height:24px;border-radius:999px;background:var(--sunk);display:grid;place-items:center;font-size:12px;font-weight:700;color:var(--ink);flex:none;margin-top:0}
+.step .t{font-size:14px;font-weight:600;letter-spacing:-.026em;color:var(--ink);line-height:24px}
+.copyrow{display:flex;align-items:center;gap:10px;margin-top:8px}
+.copyrow .val{flex:1;min-width:0;height:40px;border-radius:12px;background:var(--sunk);padding:0 13px;display:flex;align-items:center;font-size:14.5px;font-weight:700;letter-spacing:-.03em;color:var(--ink)}
+.copyrow .cp{height:40px;padding:0 14px;border-radius:12px;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;letter-spacing:-.02em;background:var(--surface);box-shadow:var(--e1);color:var(--ink)}
+.copyrow .cp i{font-size:16px}
+:root[data-theme="dark"] .copyrow .cp{border:1px solid var(--hair)}
+
+/* ---- request sent */
+.sent .hrow .lab{font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:-.01em}
+.sent .big{font-family:var(--mono);font-size:40px;font-weight:700;letter-spacing:-.045em;line-height:1;color:var(--ink);margin-top:12px}
+.kv{margin-top:18px;border-top:1px solid var(--hair)}
+.kv div{display:flex;justify-content:space-between;align-items:center;padding:12px 0;font-size:13.5px;color:var(--muted);font-weight:500}
+.kv div + div{border-top:1px solid var(--hair)}
+.kv b{font-weight:600;color:var(--ink)}
+
+/* ---- Make a test card with prices, and locked at zero */
+.rts{display:flex;flex-direction:column;gap:10px;padding:0 18px}
+.rt{display:flex;align-items:center;gap:14px;padding:15px 15px 15px 16px;border-radius:20px;border:1px solid var(--hair);background:var(--surface)}
+.rt .lead{font-size:22px;color:var(--ink);flex:none}
+.rt .lead.ai{color:var(--accent)}
+.rt .t{font-size:15px;font-weight:600;letter-spacing:-.026em;color:var(--ink)}
+.rt .s{font-size:12.5px;font-weight:500;color:var(--muted);margin-top:3px;letter-spacing:-.015em;line-height:1.4}
+.rt.off .t,.rt.off .lead,.rt.off .lead.ai{color:var(--faint)}
+.rt.off .s{color:var(--faint)}
+.rt.off .lock{margin-left:auto;font-size:18px;color:var(--faint)}
+.cfoot{display:flex;align-items:center;justify-content:space-between;padding:16px 22px 6px;font-size:12.5px;font-weight:600;color:var(--muted);letter-spacing:-.015em}
+.cfoot b{color:var(--ink)}
+.cfoot .lnk{font-size:13px;font-weight:700;color:var(--ink);letter-spacing:-.02em}
+.cadd{padding:14px 18px 8px}
+.cadd .btn{height:50px}
+.cadd .reason{margin-top:10px}
+
+/* ---- the quote above an AI button */
+.quote{display:flex;align-items:baseline;justify-content:space-between;padding:0 4px 10px;font-size:13px;font-weight:600;color:var(--muted);letter-spacing:-.02em}
+.quote .x{font-family:var(--mono);color:var(--faint);letter-spacing:-.04em}
+.quote .tot{font-family:var(--mono);font-size:19px;font-weight:700;color:var(--ink);letter-spacing:-.04em}
+.short{display:flex;gap:10px;align-items:flex-start;padding:0 4px 12px;font-size:13px;font-weight:600;color:var(--wn);letter-spacing:-.015em;line-height:1.4}
+.short i{font-size:19px;flex:none;margin-top:-1px}
+.short b{color:var(--ink);font-weight:700}
+.btn.soft{background:var(--sunk);color:var(--ink);box-shadow:none;margin-top:8px}
+.sticky2 .btn.soft{height:48px}
+
+/* ---- describe your test (as it is today) */
+.flabel{font-size:13px;font-weight:600;color:var(--muted);letter-spacing:-.01em;margin:0 0 8px}
+.fld{background:var(--surface);border-radius:18px;box-shadow:var(--e1);padding:15px 17px;font-size:15px;color:var(--ink);letter-spacing:-.02em;line-height:1.4}
+:root[data-theme="dark"] .fld{border:1px solid var(--hair)}
+.fld.tall{min-height:104px}
+
+/* ---- a notice on Home when credit is low or gone */
+.notice{display:flex;gap:12px;align-items:flex-start;padding:16px 16px 16px;border-radius:22px;background:var(--od-soft)}
+.notice.wn{background:var(--wn-soft)}
+.notice > i{font-size:22px;margin-top:1px;flex:none;color:var(--od)}
+.notice.wn > i{color:var(--wn)}
+.notice .t{font-size:14.5px;font-weight:700;letter-spacing:-.026em;color:var(--od)}
+.notice.wn .t{color:var(--wn)}
+.notice .s{font-size:12.5px;font-weight:500;letter-spacing:-.012em;line-height:1.5;margin-top:5px;color:var(--body)}
+.notice .go{margin-top:13px;display:inline-flex;height:38px;padding:0 18px;border-radius:12px;background:var(--action);color:var(--action-ink);font-size:13px;font-weight:700;align-items:center;letter-spacing:-.02em}
+
+/* ---- Home */
+.live{padding:16px 17px}
+.live .top{display:flex;align-items:center;gap:8px}
+.live .top .meta{margin:0}
+.live .nm{margin-top:11px;font-size:17px;font-weight:700;letter-spacing:-.03em;color:var(--ink)}
+.live .track{margin-top:15px}
+.pad-nav2{height:110px}
+
+/* ================= the admin app ================= */
+.att{display:flex;align-items:center;gap:14px;padding:15px 17px}
+.att .ic{width:44px;height:44px;border-radius:14px;background:var(--wn-soft);color:var(--wn);display:grid;place-items:center;font-size:22px;flex:none}
+.fl{padding:4px 18px}
+.fr{display:flex;justify-content:space-between;align-items:center;padding:14px 0;font-size:14px;color:var(--muted);font-weight:500;letter-spacing:-.01em}
+.fr + .fr{border-top:1px solid var(--hair)}
+.fr b{font-family:var(--mono);font-size:15px;font-weight:600;color:var(--ink);letter-spacing:-.04em}
+.fr .chev{margin-left:8px}
+.fr .val{display:flex;align-items:center}
+.crow{display:flex;gap:14px;align-items:center;padding:15px 17px}
+.crow .av{width:44px;height:44px;font-size:13px;flex:none}
+.crow .t{font-size:15px;font-weight:600;letter-spacing:-.028em;color:var(--ink);line-height:1.25}
+.crow .mt{font-size:11.5px;font-weight:600;color:var(--muted);margin-top:3px;letter-spacing:-.005em;line-height:1.4}
+.crow .tr{text-align:right;flex:none}
+.crow .tr .v{font-family:var(--mono);font-size:15.5px;font-weight:700;letter-spacing:-.04em;color:var(--ink)}
+.crow .tr .l{font-size:11px;font-weight:600;color:var(--muted);margin-top:3px}
+.crow .tr.low .v,.crow .tr.low .l{color:var(--wn)}
+.crow .tr.zero .v,.crow .tr.zero .l{color:var(--od)}
+.crow .tr .tag{margin-top:5px}
+.navbar5{position:absolute;left:12px;right:12px;bottom:34px;height:64px;border-radius:999px;background:var(--surface);box-shadow:var(--e4);display:flex;align-items:center;justify-content:space-around;padding:0 6px;z-index:2}
+:root[data-theme="dark"] .navbar5{border:1px solid var(--hair)}
+.navbar5 .ni{width:54px}
+.req{padding:16px 17px 15px}
+.req .head{display:flex;gap:13px;align-items:center}
+.req .head .av{width:42px;height:42px;font-size:12.5px;flex:none}
+.req .head .amt{margin-left:auto;font-family:var(--mono);font-size:18px;font-weight:700;letter-spacing:-.04em;color:var(--ink);flex:none}
+.req .code{display:flex;align-items:center;gap:8px;margin-top:13px;font-size:12px;font-weight:600;color:var(--muted)}
+.req .code .num{height:26px;padding:0 10px;border-radius:9px;background:var(--sunk);display:inline-flex;align-items:center;font-size:13px;font-weight:700;color:var(--ink);letter-spacing:-.03em}
+.req .acts{display:flex;gap:8px;margin-top:13px}
+.req .acts .b{flex:1;height:44px;border-radius:13px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:13.5px;font-weight:700;letter-spacing:-.02em;background:var(--sunk);color:var(--ink)}
+.req .acts .b.on{background:var(--action);color:var(--action-ink);box-shadow:var(--e2)}
+.switch{width:46px;height:28px;border-radius:999px;background:var(--faint);position:relative;flex:none}
+.switch::after{content:"";position:absolute;top:3px;left:3px;width:22px;height:22px;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18)}
+.switch.on{background:var(--ok)}
+.switch.on::after{left:21px}
+.swrow{display:flex;align-items:center;gap:14px;padding:15px 17px}
+.swrow .t{font-size:14.5px;font-weight:600;letter-spacing:-.026em;color:var(--ink)}
+.swrow .s{font-size:11.5px;font-weight:600;color:var(--muted);margin-top:3px;line-height:1.4}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{height:30px;padding:0 12px;border-radius:999px;display:inline-flex;align-items:center;font-size:12px;font-weight:600;letter-spacing:-.02em;background:var(--sunk);color:var(--muted)}
+.chip.wn{background:var(--wn-soft);color:var(--wn)}
+.cardfld{padding:0 22px}
+.cardfld + .cardfld{margin-top:12px}
+.cardfld .flabel{margin-bottom:7px}
+.cardfld .fld{height:50px;padding:0 16px;display:flex;align-items:center;border-radius:16px}
+.cardfld .fld .pre{font-family:var(--mono);color:var(--muted);margin-right:6px}
+.cardfld .fld.ph{color:var(--faint)}
+.choice .after{display:flex;justify-content:space-between;padding:14px 22px 0;font-size:12.5px;font-weight:600;color:var(--muted)}
+.choice .after b{font-family:var(--mono);color:var(--ink);letter-spacing:-.04em}
+.choice .btns{padding:16px 18px 6px;display:flex;flex-direction:column;gap:8px}
+.choice .btns .btn{height:50px}
+.choice .btns .text{height:42px;display:grid;place-items:center;font-size:13.5px;font-weight:700;color:var(--muted)}
+.b2{height:38px;padding:0 15px;border-radius:12px;display:inline-flex;align-items:center;font-size:13px;font-weight:700;letter-spacing:-.02em;background:var(--sunk);color:var(--ink);flex:none}
+.b2.on{background:var(--action);color:var(--action-ink);box-shadow:var(--e2)}

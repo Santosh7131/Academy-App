@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:math';
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -16,6 +15,7 @@ import '../../core/session.dart';
 import '../../core/web_bits.dart' show saveOrShareFile, savesFiles;
 import '../../theme.dart';
 import '../../ui/kit.dart';
+import '../../ui/picture.dart';
 import 'common.dart';
 import 'subjects.dart';
 
@@ -50,12 +50,7 @@ String reportPeriodName(ReportPeriod p, DateTime now) =>
     p == ReportPeriod.all ? 'Up to ${DateFormat('d MMMM y').format(now)}' : DateFormat('MMMM y').format(reportRange(p, now).$1!);
 
 /// The card as the picture that is shared: 1080 pixels wide, three to each of its 360 points.
-Future<Uint8List> reportPicture(RenderRepaintBoundary boundary) async {
-  final image = await boundary.toImage(pixelRatio: 3);
-  final data = await image.toByteData(format: ui.ImageByteFormat.png);
-  image.dispose();
-  return data!.buffer.asUint8List();
-}
+Future<Uint8List> reportPicture(RenderRepaintBoundary boundary) => pngOf(boundary);
 
 class _ParentReportScreenState extends State<ParentReportScreen> {
   final _boundary = GlobalKey();

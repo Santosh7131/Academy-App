@@ -33,6 +33,9 @@ jobs:
       - run: node tools/passages-test.mjs
       - run: node tools/second-look-test.mjs
       - run: node tools/votes-test.ts
+      - run: node tools/attendance-test.mjs
+      - run: node tools/fees-test.mjs
+      - run: node tools/solutions-test.mjs
 
   app:
     runs-on: ubuntu-latest

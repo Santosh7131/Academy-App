@@ -389,6 +389,14 @@ try {
   check('while the maths students of the class still get it', await seesTest(S2, old.body.id));
   check('a subject in use cannot be deleted', (await api('DELETE', `/teacher/subjects/${own.id}`, T)).status === 409);
   check('Maths cannot be deleted', (await api('DELETE', `/teacher/subjects/${maths.id}`, T)).status === 409);
+  // A subject nothing uses yet can go: it leaves the tuition's subjects, and deleting it again finds nothing.
+  const spare = (await api('POST', '/teacher/subjects', T, { name: `${tag} spare` })).body?.subject;
+  if (spare?.id) created.subjects.push(spare.id);
+  const gone = await api('DELETE', `/teacher/subjects/${spare?.id}`, T);
+  check('a subject nothing uses is deleted', gone.status === 200 && gone.body?.ok === true, gone.body);
+  const left = (await api('GET', '/teacher/subjects', T)).body?.subjects ?? [];
+  check('and is gone from the tuition\'s subjects', !left.some((x: any) => x.id === spare?.id), left.map((x: any) => x.name));
+  check('deleting it again finds nothing', (await api('DELETE', `/teacher/subjects/${spare?.id}`, T)).status === 404);
 
   // A question paper is kept under its name and lists the questions saved from it, in paper order.
   // (The app before 1.3 sends the details up front, with a year and school that are now ignored.)

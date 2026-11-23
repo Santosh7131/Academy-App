@@ -17,13 +17,6 @@ export async function freeJoinCode(db: Db = pool): Promise<string> {
   }
 }
 
-/** A code as typed: any case, with spaces or dashes. */
-export function readCode(raw: unknown): string {
-  const s = typeof raw === 'string' ? raw.toUpperCase().replace(/[^A-Z0-9]/g, '') : '';
-  if (!/^[A-HJ-NP-Z2-9]{6}$/.test(s)) throw bad('That code is not right. It has six letters and numbers.', 'invalid_code');
-  return s;
-}
-
 /** "KR7-4MQ": how a code is shown. */
 export const showCode = (code: string) => `${code.slice(0, 3)}-${code.slice(3)}`;
 

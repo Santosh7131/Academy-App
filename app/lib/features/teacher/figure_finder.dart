@@ -71,9 +71,6 @@ GreyPage greyPage(Uint8List rgba, int w, int h, {int width = lookWidth}) {
   return GreyPage(ow, oh, out);
 }
 
-/// The figures on a picture given as RGBA bytes: see [findFigures]. One plain call, so it can be run away from the screen's thread.
-List<FigureBox> findFiguresInRgba(Uint8List rgba, int w, int h) => findFigures(greyPage(rgba, w, h));
-
 /// What was seen on a picture given as RGBA bytes: see [lookAt]. One plain call, so it can be run away from the screen's thread.
 PageLook lookAtRgba(Uint8List rgba, int w, int h) => lookAt(greyPage(rgba, w, h));
 

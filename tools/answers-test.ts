@@ -159,7 +159,6 @@ async function check_paper(P: string, { second = true } = {}) {
   }
   return { last, sec };
 }
-const L = (i: number | null) => (i == null ? '-' : 'ABCD'[i]);
 
 try {
   // ---------------------------------------------------------------- what two models say

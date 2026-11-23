@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'api.dart';
 import 'brand.dart';
 import 'changes.dart';
+import 'google.dart';
 import 'library.dart';
 
 enum ThemeChoice { system, light, dark }
@@ -37,7 +38,14 @@ class Session extends ChangeNotifier {
   /// The tuition on screen: one of the active ones. Sent with every request.
   String? tuitionId;
 
+  /// A group's or course's join link that opened the app, kept until the student asks to join with it (or says no): it
+  /// waits through logging in and making an account. The join screen offers it.
+  String? pendingJoin;
+
   bool get signedIn => api.token != null && user != null;
+
+  /// The person signed in on this phone with Google, so they have no password to type: deleting the account asks Google again.
+  bool get signedInWithGoogle => _prefs.getString('signed_in_with') == 'google';
   bool get isTeacher => user?['role'] == 'teacher';
   String get firstName => '${user?['display_name'] ?? ''}'.trim().split(RegExp(r'\s+')).first;
 
@@ -69,6 +77,26 @@ class Session extends ChangeNotifier {
     _prefs = await SharedPreferences.getInstance();
     theme = ThemeChoice.values.firstWhere((t) => t.name == _prefs.getString('theme'), orElse: () => ThemeChoice.system);
     tuitionName = _prefs.getString('tuition_name') ?? appName;
+    pendingJoin = _prefs.getString('pending_join');
+  }
+
+  /// Keeps the code of a join link that opened the app (lib/router.dart). Listeners hear of it a moment later, not while the
+  /// router is still working out where to go.
+  void holdJoin(String raw) {
+    final code = raw.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    if (!RegExp(r'^[A-HJ-NP-Z2-9]{10}$').hasMatch(code) || code == pendingJoin) return;
+    pendingJoin = code;
+    _prefs.setString('pending_join', code);
+    Future.microtask(notifyListeners);
+  }
+
+  /// The join link is used, or the student said no to it (or a tutor opened it). Listeners hear of it a moment later, as with
+  /// [holdJoin], so the router may call this too.
+  void dropJoin() {
+    if (pendingJoin == null) return;
+    pendingJoin = null;
+    _prefs.remove('pending_join');
+    Future.microtask(notifyListeners);
   }
 
   Future<void> restore() async {
@@ -137,16 +165,19 @@ class Session extends ChangeNotifier {
 
   Future<void> login(String username, String secret) async {
     final r = await api.post('/auth/login', {'username': username.trim().toLowerCase(), 'secret': secret});
-    if (r['user']?['role'] == 'developer') {
-      // The developer's login is for the admin app; leave no session behind in this one.
-      api.token = r['token'] as String;
-      try {
-        await api.post('/auth/logout');
-      } catch (_) {}
-      api.token = null;
-      throw ApiException(403, 'admin_app', 'This login is for the $adminAppName app.');
-    }
+    await _refuseDeveloper(r);
     await _signedIn(r);
+  }
+
+  /// The developer's login is for the admin app; leave no session behind in this one.
+  Future<void> _refuseDeveloper(dynamic r) async {
+    if (r['user']?['role'] != 'developer') return;
+    api.token = r['token'] as String;
+    try {
+      await api.post('/auth/logout');
+    } catch (_) {}
+    api.token = null;
+    throw ApiException(403, 'admin_app', 'This login is for the $adminAppName app.');
   }
 
   /// A tutor makes their own login. They have no tuition yet: [createTuition] comes next.
@@ -155,9 +186,26 @@ class Session extends ChangeNotifier {
     await _signedIn(r);
   }
 
-  Future<void> _signedIn(dynamic r) async {
+  /// A student makes their own login. They are in no tuition yet: they ask to join one next, with a link, a QR code or a code.
+  Future<void> signUpStudent({required String name, required String username, required String password}) async {
+    final r = await api.post('/auth/signup-student', {'display_name': name.trim(), 'username': username.trim().toLowerCase(), 'password': password});
+    await _signedIn(r);
+  }
+
+  /// Signs in with a Google account's ID token ([GoogleAuth.idToken]). A Google account with no login makes one when [role] says
+  /// which kind ('student' or 'teacher'); without a role the server answers 404 no_account and the screen asks. True when a
+  /// login was made.
+  Future<bool> signInWithGoogle(String idToken, {String? role}) async {
+    final r = await api.post('/auth/google', {'id_token': idToken, 'role': ?role});
+    await _refuseDeveloper(r);
+    await _signedIn(r, via: 'google');
+    return r['created'] == true;
+  }
+
+  Future<void> _signedIn(dynamic r, {String via = 'password'}) async {
     api.token = r['token'] as String;
     await _storage.write(key: 'token', value: api.token);
+    await _prefs.setString('signed_in_with', via);
     user = Map<String, dynamic>.from(r['user']);
     tuitionId = null;
     _applyTuitions(r['tuitions']);
@@ -200,10 +248,23 @@ class Session extends ChangeNotifier {
     changes.reportAreas(Area.values.toSet());
   }
 
+  /// A new password for the signed-in person. Every other phone they are logged in on is signed out.
+  Future<void> changePassword(String current, String next) => api.post('/auth/password', {'current': current, 'next': next});
+
+  /// Deletes the signed-in student's account for good, with their results in every tuition: with their password, or, for a
+  /// login made with Google, with a fresh Google token ([GoogleAuth.idToken]).
+  Future<void> deleteAccount({String? secret, String? idToken}) async {
+    await api.post('/auth/delete-account', {'secret': ?secret, 'id_token': ?idToken});
+    await GoogleAuth.signOut();
+    await _clear();
+    notifyListeners();
+  }
+
   Future<void> logout() async {
     try {
       await api.post('/auth/logout');
     } catch (_) {}
+    if (signedInWithGoogle) await GoogleAuth.signOut();
     await _clear();
     notifyListeners();
   }
@@ -219,6 +280,7 @@ class Session extends ChangeNotifier {
     await _storage.delete(key: 'token');
     await _prefs.remove('user');
     await _prefs.remove('tuitions');
+    await _prefs.remove('signed_in_with');
   }
 
   void _signedOutByServer() {

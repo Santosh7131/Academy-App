@@ -46,13 +46,11 @@ class _AccountScreenState extends State<AccountScreen> {
     }
   }
 
-  bool get _isStudent => _d?['account']?['role'] == 'student';
-
   Future<void> _signOut(String name, Map<String, dynamic> body, String phone) async {
     final yes = await confirmCard(
       context,
       title: 'Sign out this phone?',
-      body: '$name is signed out on $phone and needs the username and ${_isStudent ? 'PIN' : 'password'} to log back in there.',
+      body: '$name is signed out on $phone and has to log in again there.',
       confirm: 'Sign out',
       destructive: true,
     );
@@ -148,9 +146,10 @@ class _AccountScreenState extends State<AccountScreen> {
                 child: Icon(e['outcome'] == 'ok' || e['outcome'] == 'signup' ? Ph.check : Ph.x, size: 16, color: e['outcome'] == 'ok' || e['outcome'] == 'signup' ? success : danger),
               ),
               title: switch (e['outcome']) {
-                'ok' => _isStudent ? 'PIN right' : 'Password right',
+                // Students make their own logins now, with a password or Google, so none of these is a PIN.
+                'ok' => 'Logged in',
                 'signup' => 'Signed up',
-                'wrong_secret' => _isStudent ? 'Wrong PIN' : 'Wrong password',
+                'wrong_secret' => 'Wrong password',
                 'lockout' => 'Locked after 5 wrong tries',
                 'locked' => 'Tried while locked',
                 'inactive' => 'Tried while turned off',

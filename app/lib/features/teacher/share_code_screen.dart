@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/api.dart';
+import '../../core/brand.dart';
 import '../../theme.dart';
 import '../../ui/kit.dart';
 
@@ -44,7 +45,7 @@ class _ShareCodeScreenState extends State<ShareCodeScreen> {
 
   String get _code => '${_t?['join_code_shown'] ?? ''}';
 
-  String get _message => 'Join ${_t?['name']} in the app. Log in, choose "Join another tuition" and enter the code $_code.';
+  String get _message => 'Join ${_t?['name']} on $appName. Open the app, make a student account, and type the code $_code to ask to join.';
 
   @override
   Widget build(BuildContext context) {
@@ -61,7 +62,10 @@ class _ShareCodeScreenState extends State<ShareCodeScreen> {
         else if (t == null)
           const LoadingState(rows: 2)
         else ...[
-          Fig('Students type this code in the app to ask to join.', style: bodyStyle.copyWith(color: muted)),
+          Fig(
+            'Students type this code in the app to ask to join; you choose their class when you let them in. To invite them straight into a group or course, open it and tap Invite students.',
+            style: bodyStyle.copyWith(color: muted),
+          ),
           const SizedBox(height: 20),
           Surface(
             shadow: e1,

@@ -152,8 +152,9 @@ class _LogScreenState extends State<LogScreen> with WidgetsBindingObserver, Auto
           what == 'ok' || what == 'signup' ? successSoft : dangerSoft,
           switch (what) {
             'ok' => '$who logged in',
-            'signup' => '$who signed up as a tutor',
-            'wrong_secret' => '$who: wrong PIN or password',
+            // Students sign themselves up too now, so this does not say which.
+            'signup' => '$who signed up',
+            'wrong_secret' => '$who: wrong password',
             'lockout' => '$who locked after 5 wrong tries',
             'locked' => '$who tried while locked',
             'inactive' => '$who tried while turned off',

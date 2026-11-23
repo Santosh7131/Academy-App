@@ -27,6 +27,8 @@ for (const k of ['DATABASE_URL', 'DATABASE_URL_UNPOOLED']) {
   if (process.env.NEON_BRANCH !== 'dev' || !devHosts.includes(host)) throw new Error(`${k} is not a dev database: refusing to start`);
 }
 process.env.PUSH_DRY_RUN = '1';
+// A join link's page opens the app by its id: here that is the debug build's, which ends in ".dev" (app/android/app/build.gradle.kts).
+process.env.APP_ID ??= 'com.tuitiontests.app.dev';
 
 const { default: app } = await import('../api/src/index.ts');
 const port = Number(process.argv[2] ?? 18787);

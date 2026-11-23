@@ -8,7 +8,7 @@ import { bad, HttpError, notFound, str, uuid } from '../lib/http.ts';
 import { courseLibraryCount, discardObjects, shelfObjects } from '../lib/library.ts';
 import { afterTestChange } from '../lib/notify.ts';
 import { deleteObjects } from '../lib/storage.ts';
-import { createWithLogin, pinOf, planLogin } from '../lib/students.ts';
+import { createWithLogin, pinOf, planLogin, tutorMadeLoginsOff } from '../lib/students.ts';
 import { memberStudents } from '../lib/tuition.ts';
 import { readBody } from './body.ts';
 
@@ -164,9 +164,11 @@ courseRoutes.post('/courses/:id/people', async (c) => {
 
 /**
  * Makes a new person who is only in this course: a student with a login and no class and no group. The login
- * is suggested and made the way a group's student's is (see POST /students).
+ * is suggested and made the way a group's student's is (see POST /students). Test database only: students make
+ * their own logins and join with the course's link (lib/students.ts, tutorMadeLoginsOff).
  */
 courseRoutes.post('/courses/:id/people/new', async (c) => {
+  tutorMadeLoginsOff();
   const T = tuitionOf(c).id;
   const id = uuid(c.req.param('id'), 'course id');
   await ownCourse(T, id);

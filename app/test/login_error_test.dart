@@ -1,4 +1,4 @@
-// A login that never reached the server (no internet, the server out of reach) keeps the PIN or password, so trying again is one tap;
+// A login that never reached the server (no internet, the server out of reach) keeps the password, so trying again is one tap;
 // a login the server refused clears it for a fresh try. Both show what went wrong.
 //   flutter test test/login_error_test.dart
 import 'package:flutter/material.dart';
@@ -34,11 +34,9 @@ Future<void> _settle(WidgetTester t) async {
   }
 }
 
-/// Signs in as a tutor with a password, and returns what the password box holds afterwards.
-Future<String> _tryTutor(WidgetTester t) async {
+/// Signs in with a username and password, and returns what the password box holds afterwards.
+Future<String> _tryLogin(WidgetTester t) async {
   await _open(t);
-  await t.tap(find.text('Tutor'));
-  await _settle(t);
   await t.enterText(find.byType(TextField).first, 'asha');
   await t.enterText(find.byType(TextField).last, 'a-long-password');
   await t.tap(find.text('Log in'));
@@ -58,13 +56,13 @@ void main() {
 
   testWidgets('a login that never reached the server keeps the password', (t) async {
     _unreachable = true;
-    expect(await _tryTutor(t), 'a-long-password', reason: 'the tutor would have to type the password again only because the internet dropped');
+    expect(await _tryLogin(t), 'a-long-password', reason: 'they would have to type the password again only because the internet dropped');
     expect(find.textContaining('No internet connection'), findsOneWidget);
   });
 
   testWidgets('a login the server refused clears the password', (t) async {
     _unreachable = false;
-    expect(await _tryTutor(t), isEmpty);
+    expect(await _tryLogin(t), isEmpty);
     expect(find.text('That username and password do not match.'), findsOneWidget);
   });
 }

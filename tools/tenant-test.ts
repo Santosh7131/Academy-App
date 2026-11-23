@@ -128,7 +128,6 @@ try {
   check('B lists none of A\'s students', (await api('GET', '/teacher/students', TB)).body.students.length === 0);
   nf('B cannot open A\'s student', await api('GET', `/teacher/students/${a1}`, TB));
   nf('B cannot rename A\'s student', await api('PATCH', `/teacher/students/${a1}`, TB, { display_name: 'Hijack' }));
-  nf('B cannot reset A\'s student PIN', await api('POST', `/teacher/students/${a1}/reset-pin`, TB, {}));
   nf('B cannot turn A\'s student off', await api('POST', `/teacher/students/${a1}/active`, TB, { active: false }));
   nf('B cannot delete A\'s student', await api('DELETE', `/teacher/students/${a1}`, TB));
   nf('B cannot open A\'s question', await api('GET', `/teacher/questions/${aq.body.id}`, TB));
@@ -261,30 +260,24 @@ try {
   const stillHomeA = await api('GET', '/student/home', SA1, undefined, { 'x-tuition': A });
   check('the student still sees A\'s test as a Class 9 student', stillHomeA.body.tests.some((x: any) => x.id === aTest.body.id), stillHomeA.body.tests);
 
-  // ------------------------------------------------------------------ B resets the PIN, then removes the student
-  const reset = await api('POST', `/teacher/students/${a1}/reset-pin`, TB, { pin: '9999' });
-  check('B resets the shared student\'s PIN', reset.status === 200 && reset.body.login.pin === '9999', reset.body);
-  check('the old session is signed out', (await api('GET', '/student/home', SA1)).status === 401);
-  const relog = await login(`${tag}.alpha`, '9999');
-  check('the new PIN works', relog.status === 200 && relog.body.tuitions.length === 2, relog.body);
-  const SA1b = relog.body.token as string;
-
-  const off = await api('POST', `/teacher/students/${a1}/active`, TA, { active: false });
+  // ------------------------------------------------------------------ A turns the student off, then B removes them
+  // (No tutor can give a student a new PIN any more: the account is the student's own. tools/security-test.ts checks that.)
+  const off =await api('POST', `/teacher/students/${a1}/active`, TA, { active: false });
   check('A turns the student off in A', off.status === 200, off.body);
-  const afterOff = await api('GET', '/student/tuitions', SA1b);
+  const afterOff = await api('GET', '/student/tuitions', SA1);
   check('the student keeps B and loses A', afterOff.body.tuitions.length === 1 && afterOff.body.tuitions[0].id === B, afterOff.body);
-  const stillLogs = await login(`${tag}.alpha`, '9999');
+  const stillLogs = await login(`${tag}.alpha`, '1111');
   check('the login still works, because B is still a place', stillLogs.status === 200, stillLogs.body);
-  const defaultNow = await api('GET', '/student/home', SA1b);
+  const defaultNow = await api('GET', '/student/home', SA1);
   check('with A off, the default tuition is B', defaultNow.body.tuition?.id === B, defaultNow.body.tuition);
-  const asA = await api('GET', '/student/home', SA1b, undefined, { 'x-tuition': A });
+  const asA = await api('GET', '/student/home', SA1, undefined, { 'x-tuition': A });
   check('and A cannot be opened', asA.status === 403, asA);
   await api('POST', `/teacher/students/${a1}/active`, TA, { active: true });
-  check('A turns the student back on', (await api('GET', '/student/tuitions', SA1b)).body.tuitions.length === 2);
+  check('A turns the student back on', (await api('GET', '/student/tuitions', SA1)).body.tuitions.length === 2);
 
   const rm = await api('DELETE', `/teacher/students/${a1}`, TB);
   check('B removes the student from B', rm.status === 200, rm.body);
-  const remaining = await api('GET', '/student/tuitions', SA1b);
+  const remaining = await api('GET', '/student/tuitions', SA1);
   check('the student keeps their login and A', remaining.body.tuitions.length === 1 && remaining.body.tuitions[0].id === A, remaining.body);
   const keptAttempts = await api('GET', `/teacher/students/${a1}`, TA);
   check('A still has the student with their results', keptAttempts.status === 200 && keptAttempts.body.attempts.length === 1, keptAttempts.body);
@@ -313,7 +306,7 @@ try {
   check('the old code no longer works', oldCode.status === 404, oldCode.body);
   const closed = await api('PATCH', '/teacher/tuition', TB, { join_open: false });
   check('the owner closes joining', closed.status === 200 && closed.body.tuition.join_open === false, closed.body);
-  const closedJoin = await api('POST', '/student/join', SA1b, { code: regen.body.tuition.join_code });
+  const closedJoin = await api('POST', '/student/join', SA1, { code: regen.body.tuition.join_code });
   check('nobody can ask to join a closed tuition', closedJoin.status === 403 && code(closedJoin) === 'not_joinable', closedJoin.body);
 
   // ------------------------------------------------------------------ guessing codes

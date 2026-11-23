@@ -14,6 +14,7 @@ import { authRoutes } from './routes/auth.ts';
 import { courseRoutes } from './routes/courses.ts';
 import { creditAdminRoutes, creditRoutes } from './routes/credit.ts';
 import { libraryRoutes } from './routes/library.ts';
+import { joinPublicRoutes, linkRoutes } from './routes/links.ts';
 import { notifyRoutes } from './routes/notify.ts';
 import { paperRoutes } from './routes/papers.ts';
 import { studentOpenRoutes, studentRoutes } from './routes/student.ts';
@@ -97,12 +98,15 @@ app.route('/auth', authRoutes);
 app.route('/student', studentOpenRoutes);
 app.route('/student', studentRoutes);
 app.route('/', notifyRoutes);
+// A group's or course's join link: what it is for (GET /join/:code), and the page it opens in a browser (GET /j/:code).
+app.route('/', joinPublicRoutes);
 
 const teacher = new Hono<AppEnv>();
 teacher.use('*', requireUser('teacher'));
 teacher.route('/', teacherRoutes);
 teacher.route('/', tuitionRoutes);
 teacher.route('/', courseRoutes);
+teacher.route('/', linkRoutes);
 teacher.route('/', libraryRoutes);
 teacher.route('/', paperRoutes);
 teacher.route('/', creditRoutes);

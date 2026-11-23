@@ -10,6 +10,7 @@ import { abortMultipart, deleteObjects, listObjects } from '../lib/storage.ts';
 import { subjectIds } from '../lib/subjects.ts';
 import { ensureGroup, freeJoinCode, showCode, taughtSubjectIds } from '../lib/tuition.ts';
 import { readBody } from './body.ts';
+import { LINK_REQUESTS } from './links.ts';
 
 // A tutor's own tuition: its name, the code students join with, and the students asking to join.
 // Mounted with the teacher routes, behind requireUser('teacher').
@@ -48,8 +49,9 @@ tuitionRoutes.patch('/tuition', async (c) => {
 
 /**
  * Deletes the tuition for good, with the owner's password: its tests and the students' results, papers, questions, groups, courses
- * and Library files, and the accounts of everyone who was in it and in no other tuition, the owner's too. Anyone with a place in
- * another tuition (or a request waiting there) keeps their account and that place, and so does anyone who had only asked to join. The money that came in stays on record: credit lines
+ * and Library files, and the accounts of its tutors who are in no other tuition, the owner's too. Students keep their accounts (they
+ * made them, and can join another tuition or delete them themselves), and so does any tutor with a place in another tuition (or a
+ * request waiting there), or who had only asked to join. The money that came in stays on record: credit lines
  * that added credit keep the tuition's name (migration 034); every other line goes with it. Storage is emptied once the rows are gone.
  */
 tuitionRoutes.post('/tuition/delete', async (c) => {
@@ -93,9 +95,10 @@ tuitionRoutes.post('/tuition/delete', async (c) => {
     // The tests first: a test holds on to its questions, which would stop the rest.
     const tests = await cx.query('delete from tests where tuition_id = $1', [T]);
     await cx.query('delete from tuitions where id = $1', [T]);
-    // Never a developer, and never anyone who still has a place (or a request waiting) in another tuition.
+    // Tutors only (never a student, whose account is their own, or a developer), and never one who still has a place (or a
+    // request waiting) in another tuition.
     const users = await q<{ id: string }>(
-      `delete from users u where u.id = any($1::uuid[]) and u.role <> 'developer'
+      `delete from users u where u.id = any($1::uuid[]) and u.role = 'teacher'
           and not exists (select 1 from memberships m where m.user_id = u.id)
         returning u.id`,
       [members],
@@ -123,15 +126,22 @@ tuitionRoutes.post('/tuition/join-code', async (c) => {
 
 // ---------------------------------------------------------------- students asking to join
 
+/**
+ * Who is waiting to be let in. `requests` asked with the tuition's code, so the tutor chooses their class (below); `link_requests`
+ * asked with a group's or course's link, so each says what for, and is let in or declined in routes/links.ts. A student who asked
+ * both ways shows only with their links.
+ */
 tuitionRoutes.get('/join-requests', async (c) => {
+  const T = tuitionOf(c).id;
   const rows = await tq(
-    tuitionOf(c).id,
+    T,
     `select u.id, u.display_name, u.username, m.class_level, m.joined_at as asked_at
        from memberships m join users u on u.id = m.user_id
       where m.tuition_id = @T and m.role = 'student' and m.status = 'pending'
+        and not exists (select 1 from join_requests r where r.tuition_id = @T and r.student_id = m.user_id)
       order by m.joined_at`,
   );
-  return c.json({ requests: rows });
+  return c.json({ requests: rows, link_requests: await tq(T, LINK_REQUESTS) });
 });
 
 /** Lets a student in, in the class and with the subjects the tutor chooses (their asked class, and none, if not sent). */
@@ -166,13 +176,20 @@ tuitionRoutes.post('/join-requests/:id/accept', async (c) => {
   return c.json({ ok: true });
 });
 
+/** Declines a student who is waiting, with any link requests they made here too. */
 tuitionRoutes.post('/join-requests/:id/decline', async (c) => {
+  const T = tuitionOf(c).id;
   const id = uuid(c.req.param('id'), 'student id');
-  const gone = await tq1(
-    tuitionOf(c).id,
-    `delete from memberships where tuition_id = @T and user_id = $1 and role = 'student' and status = 'pending' returning user_id`,
-    [id],
-  );
+  const gone = await tx(async (cx) => {
+    const m = await tq1(
+      T,
+      `delete from memberships where tuition_id = @T and user_id = $1 and role = 'student' and status = 'pending' returning user_id`,
+      [id],
+      cx,
+    );
+    if (m) await tq(T, 'delete from join_requests where tuition_id = @T and student_id = $1', [id], cx);
+    return m;
+  });
   if (!gone) throw notFound('This request');
   return c.json({ ok: true });
 });

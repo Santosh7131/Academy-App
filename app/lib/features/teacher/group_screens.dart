@@ -223,7 +223,7 @@ class _GroupScreenState extends State<GroupScreen> with WidgetsBindingObserver, 
       else if (_tab == 1)
         LibraryTab(shelf: LibShelf.group(widget.classLevel, widget.subjectId), className: _name, reload: _loads)
       else ...[
-        if (students.isEmpty) Fig('No students in this group yet.', style: bodyStyle.copyWith(color: muted)),
+        if (students.isEmpty) Fig('No students in this group yet. Invite them with the group\'s link or QR code.', style: bodyStyle.copyWith(color: muted)),
         for (final (i, s) in students.indexed) ...[
           if (i > 0) const SizedBox(height: gapRow),
           RowTile(
@@ -239,7 +239,8 @@ class _GroupScreenState extends State<GroupScreen> with WidgetsBindingObserver, 
           ),
         ],
         const SizedBox(height: gapRow),
-        SecondaryButton('Add student', icon: Ph.userPlus, onTap: () => _go('/t/students/new?$_query')),
+        // Students make their own logins and ask to join with the group's link; a tutor lets them in from Home.
+        SecondaryButton('Invite students', icon: Ph.linkSimple, onTap: () => _go('/t/invite?$_query')),
       ],
       if (students.isEmpty && tests.isEmpty && _n(d['library']) == 0) ...[
         const SizedBox(height: 22),

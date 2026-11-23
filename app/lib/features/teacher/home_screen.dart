@@ -243,7 +243,7 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
         RowTile(
           leading: _badge(Ph.userPlus),
           title: pending == 1 ? '1 student wants to join' : '$pending students want to join',
-          meta: 'Choose their class and subjects',
+          meta: 'Let them in, or decline',
           chevron: true,
           onTap: () => _go('/t/requests'),
         ),

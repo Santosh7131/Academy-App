@@ -65,6 +65,16 @@ export async function levelParam(raw: unknown, tuition: string, db: Db = pool): 
   return assertLevel(tuition, n, db);
 }
 
+/**
+ * SQL for the class part of a group's name, as the apps write it ("9th" in "9th Maths", groupName in app/lib/core/levels.dart),
+ * or the name the tuition gave a level of its own. [level] and [tuition] are the query's class and tuition id columns.
+ */
+export const groupClassSql = (level: string, tuition: string) => `case
+    when ${level} < ${CUSTOM_MIN} then ${level}::text || case when ${level} % 100 between 11 and 13 then 'th'
+      when ${level} % 10 = 1 then 'st' when ${level} % 10 = 2 then 'nd' when ${level} % 10 = 3 then 'rd' else 'th' end
+    else coalesce((select tl.label from tuition_levels tl where tl.tuition_id = ${tuition} and tl.code = ${level}), 'Level ' || ${level})
+  end`;
+
 /** What the tuition calls a level, for the words an AI model reads: "Class 9" or the name it gave. */
 export async function levelLabel(tuition: string, code: number, db: Db = pool): Promise<string> {
   if (isClassNumber(code)) return `Class ${code}`;

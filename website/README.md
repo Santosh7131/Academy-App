@@ -71,7 +71,8 @@ Re-check these when the app changes.
 - **Opening and closing times, a time limit, and "Mix the questions up for each student"** (a switch, so "if you choose").
 - **Marks and the right answers as soon as a student hands in** (the test settings screen says so).
 - **The student page:** average marks, weakest chapters, tests written and missed.
-- **Students log in with a username and a 4-digit PIN**, made by their tutor. A student with an account can ask to join another tuition with its code; a tutor lets them in.
+- **Students make their own accounts**, with a username and password or with Google (`app/lib/features/auth/signup_screen.dart`, `google_flow.dart`), and ask to join with the link or QR code a tutor shares for a group or course (`app/lib/features/teacher/invite_screen.dart`), or with the tuition's code; a tutor lets them in. The app keeps no email address (`api/src/lib/google.ts` keeps only Google's account number and the name).
+- **Invite students with a link or a QR code:** Invite students on a group's or course's page.
 - **Other tutors** are added from the app, each with a login of their own.
 - **Prices:** ₹2.40 a page, ₹0.60 a question, ₹20 free to start. They can be changed in the developer app; when they change, change the Pricing section too.
 - **Top-ups in the app:** ₹100, ₹250, ₹500 or ₹1,000 (`TOP_UPS` in `api/src/lib/credit.ts`).
@@ -81,7 +82,7 @@ Re-check these when the app changes.
 - **Not claimed:** push notifications (they need Firebase, which is not set up) and particular classes or boards.
 
 The privacy policy's facts come from the database tables and the server's code: no email addresses,
-phone numbers or IP addresses are kept; passwords and PINs are kept as salted hashes; sign-in records
+phone numbers or IP addresses are kept; passwords are kept as salted hashes; sign-in records
 are deleted after 90 days and server error records after 30. That deletion runs whenever the
 developer app shows its Overview tab (`GET /admin/overview`), the tab it opens on, so it happens
 each time you open the developer app.

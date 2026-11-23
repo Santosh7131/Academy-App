@@ -10,6 +10,7 @@ import 'dart:ui' as ui;
 import 'package:tuition_app/core/api.dart';
 import 'package:tuition_app/core/credit.dart';
 import 'package:tuition_app/core/format.dart' show dayTitle, time;
+import 'package:tuition_app/core/google.dart';
 import 'package:tuition_app/core/library.dart' show LibFile, LibraryEnv, UploadJob, UploadState;
 import 'package:tuition_app/core/session.dart';
 import 'package:tuition_app/core/updater.dart';
@@ -32,6 +33,7 @@ import 'package:tuition_app/features/teacher/course_screens.dart';
 import 'package:tuition_app/features/teacher/credit_screens.dart';
 import 'package:tuition_app/features/teacher/group_screens.dart' show ChatTestScreen, GroupScreen;
 import 'package:tuition_app/features/teacher/home_screen.dart';
+import 'package:tuition_app/features/teacher/invite_screen.dart';
 import 'package:tuition_app/features/teacher/join_requests_screen.dart';
 import 'package:tuition_app/features/teacher/make_test.dart' show TestTarget;
 import 'package:tuition_app/features/teacher/make_tests_screen.dart';
@@ -46,6 +48,7 @@ import 'package:tuition_app/features/teacher/share_code_screen.dart';
 import 'package:tuition_app/features/teacher/tests_screens.dart';
 import 'package:tuition_app/theme.dart';
 import 'package:tuition_app/ui/kit.dart' show Pressable;
+import 'package:tuition_app/ui/qr.dart' show qrPicture;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -220,6 +223,11 @@ Future<void> _both(WidgetTester t, String name, Widget Function() screen, {doubl
   }
 }
 
+/// What GET /join/:code shows of a group's link.
+Map<String, Object?> _joinLink() => {
+      'code': 'KR7Q4MPAXZ', 'code_shown': 'KR7Q4-MPAXZ', 'tuition': {'name': 'Priya Maths Classes'}, 'kind': 'group', 'label': '9th Maths', 'joining_open': true,
+    };
+
 void _sessionAs({required String role, List<Map<String, dynamic>> tuitions = const [], String? tuitionId}) {
   api.token = 'test';
   session.user = {'id': 'u-1', 'role': role, 'username': role == 'teacher' ? 'priya' : 'harini.v', 'display_name': role == 'teacher' ? 'Priya' : 'Harini Venkatesh', 'class_level': role == 'teacher' ? null : 9};
@@ -278,15 +286,41 @@ void main() {
     credit.set(null); // the balance one scene heard is not the next scene's
   });
 
-  shotTest('login, as a tutor', (t) async {
+  shotTest('login, and making an account', (t) async {
     api.token = null;
     session.user = null;
     session.tuitionName = 'Sample Tuition';
-    await _both(t, 'login-student', () => const LoginScreen());
-    await _both(t, 'login-tutor', () => const LoginScreen(), then: (t) async {
-      await t.tap(find.text('Tutor'));
-      await _settle(t);
-    });
+    session.dropJoin();
+    GoogleAuth.pretend(null);
+    await _both(t, 'login', () => const LoginScreen());
+    // With Google sign-in set up on the server.
+    GoogleAuth.pretend('shots-client.apps.googleusercontent.com');
+    await _both(t, 'login-google', () => const LoginScreen());
+    await _both(t, 'signup-student', () => const StudentSignUpScreen());
+    // A group's join link opened the app before the student had logged in.
+    routes['/join/KR7Q4MPAXZ'] = (_) => {'link': _joinLink()};
+    session.holdJoin('KR7Q4MPAXZ');
+    await _both(t, 'login-invite', () => const LoginScreen(), height: 2800);
+    session.dropJoin();
+    GoogleAuth.pretend(null);
+  });
+
+  shotTest('invite students with a link', (t) async {
+    _sessionAs(role: 'teacher', tuitions: [{'id': 't-1', 'name': 'Priya Maths Classes', 'role': 'owner', 'status': 'active'}]);
+    final link = {'code': 'KR7Q4MPAXZ', 'code_shown': 'KR7Q4-MPAXZ', 'url': 'https://join.example.com/j/KR7Q4MPAXZ', 'created_at': _iso(Duration.zero)};
+    routes['/teacher/groups/9/sub-0/link'] = (_) => {'link': link};
+    routes['/teacher/courses/c-1/link'] = (_) => {'link': {...link, 'code': 'MPAXZKR7Q4', 'code_shown': 'MPAXZ-KR7Q4'}};
+    await _both(t, 'invite-group', () => const InviteScreen(classLevel: 9, subjectId: 'sub-0', name: 'Maths'), height: 2800);
+    await _both(t, 'invite-course', () => const InviteScreen(courseId: 'c-1', name: 'Spoken English, Batch 1'), height: 2800);
+    // The picture "Share the QR code as a picture" sends.
+    if (_shots) {
+      await t.runAsync(() async {
+        final png = await qrPicture(data: link['url']!, title: '9th Maths', subtitle: 'Priya Maths Classes', code: 'KR7Q4-MPAXZ');
+        File('../tools/out/shots/invite-qr-picture.png')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(png);
+      });
+    }
   });
 
   shotTest('the opening', (t) async {
@@ -357,8 +391,19 @@ void main() {
     _sessionAs(role: 'teacher', tuitions: [{'id': 't-1', 'name': 'Priya Maths Classes', 'role': 'owner', 'status': 'active'}]);
     routes['/teacher/join-requests'] = (_) => {
           'requests': [
-            {'id': 's-1', 'display_name': 'Harini Venkatesh', 'username': 'harini.v', 'class_level': 9, 'asked_at': _iso(const Duration(minutes: -42))},
-            {'id': 's-2', 'display_name': 'Arjun Krishnan', 'username': 'arjun.k', 'class_level': 10, 'asked_at': _iso(const Duration(hours: -5))},
+            {'id': 's-1', 'display_name': 'Harini Venkatesh', 'username': 'harini.v', 'class_level': null, 'asked_at': _iso(const Duration(minutes: -42))},
+            {'id': 's-2', 'display_name': 'Arjun Krishnan', 'username': 'arjun.k', 'class_level': null, 'asked_at': _iso(const Duration(hours: -5))},
+          ],
+          // Students who opened a group's or course's link: each asked for that group or course.
+          'link_requests': [
+            {
+              'id': 'r-1', 'student_id': 's-3', 'display_name': 'Kavya Iyer', 'username': 'kavya.i', 'asked_at': _iso(const Duration(minutes: -12)),
+              'kind': 'group', 'label': '9th Maths', 'class_level': 9, 'subject_id': 'sub-0', 'course_id': null, 'place': 'pending',
+            },
+            {
+              'id': 'r-2', 'student_id': 's-4', 'display_name': 'Rahul Menon', 'username': 'rahul.m', 'asked_at': _iso(const Duration(hours: -3)),
+              'kind': 'course', 'label': 'Spoken English, Batch 1', 'class_level': null, 'subject_id': null, 'course_id': 'c-1', 'place': 'active',
+            },
           ],
         };
     routes['/teacher/subjects'] = (_) => {
@@ -368,6 +413,11 @@ void main() {
         };
     await _both(t, 'requests', () => const JoinRequestsScreen());
     for (final dark in [false, true]) {
+      await _show(t, const JoinRequestsScreen(), dark: dark);
+      await t.tap(find.text('Kavya Iyer'));
+      await _settle(t);
+      await _shot(t, 'requests-link-dialog-${dark ? 'dark' : 'light'}');
+      await t.pumpWidget(const SizedBox.shrink());
       await _show(t, const JoinRequestsScreen(), dark: dark);
       await t.tap(find.text('Harini Venkatesh'));
       await _settle(t);
@@ -412,6 +462,12 @@ void main() {
       {'id': 't-2', 'name': 'Ravi Science Tuition', 'role': 'student', 'status': 'pending', 'class_level': 9},
     ]);
     await _both(t, 'join-second', () => const JoinScreen());
+    // A new student whose phone was opened by a group's join link: what it is for, and the button to ask.
+    _sessionAs(role: 'student', tuitions: []);
+    routes['/join/KR7Q4MPAXZ'] = (_) => {'link': _joinLink()};
+    session.holdJoin('KR7Q4MPAXZ');
+    await _both(t, 'join-invite', () => const JoinScreen(), height: 2800);
+    session.dropJoin();
   });
 
   shotTest('student home with two tuitions', (t) async {
@@ -1634,12 +1690,6 @@ void main() {
     });
     await _both(t, 'courses-add-filter', () => const AddPeopleScreen(courseId: 'c-1', courseName: 'Spoken English, Batch 1'), then: (t) async {
       await t.tap(find.text('All students').first);
-      await _settle(t);
-    });
-    await _both(t, 'courses-add-new', () => const AddPeopleScreen(courseId: 'c-1', courseName: 'Spoken English, Batch 1'), then: (t) async {
-      await t.tap(find.text('New person'));
-      await _settle(t);
-      await t.enterText(find.byType(TextField).first, 'Harini Venkatesh');
       await _settle(t);
     });
   });

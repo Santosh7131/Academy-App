@@ -4,6 +4,17 @@ import { pool, q1, tx } from './db.ts';
 import { HttpError } from './http.ts';
 import { freeUsername, latinName, usernameBase } from './usernames.ts';
 
+/**
+ * Students make their own logins (POST /auth/signup-student, or Google) and join with a link their tutor shares
+ * (routes/links.ts), so a tutor no longer makes logins for them. The two routes that did (POST /teacher/students and
+ * POST /teacher/courses/:id/people/new) still work on the test database only, NEON_BRANCH=dev, where the checks use them
+ * to make students quickly. Anywhere else, the live function included, they answer 410.
+ */
+export function tutorMadeLoginsOff() {
+  if (process.env.NEON_BRANCH === 'dev') return;
+  throw new HttpError(410, 'students_sign_up', 'Students now make their own logins. Share a group or course link with them instead.');
+}
+
 /** The login chosen for a new student, before it is made. */
 export type LoginPlan = { username: string; latin: string; suggested: boolean };
 

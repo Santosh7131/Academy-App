@@ -187,7 +187,7 @@ class _OverviewScreenState extends State<OverviewScreen> with WidgetsBindingObse
           ('Tests written', '${today['tests_written']}'),
           ('Writing now', '${today['writing_now']}'),
           ('Logins', f.count(f.asInt(today['logins']))),
-          ('Wrong PINs, lockouts', '${today['wrong_secrets']}, ${today['lockouts']}'),
+          ('Wrong passwords, lockouts', '${today['wrong_secrets']}, ${today['lockouts']}'),
           ('API requests, errors', '${f.count(f.asInt(today['requests']))}, ${today['errors']}'),
           ('AI reads, failed', '${today['ai_calls']}, ${today['ai_failed']}'),
           if (aiCost['today_inr'] != null) ('AI work, at list prices', f.rupees(f.asDouble(aiCost['today_inr']))),

@@ -11,7 +11,6 @@ import '../../ui/kit.dart';
 import 'common.dart';
 import 'library_tab.dart';
 import 'make_test.dart';
-import 'students_screens.dart' show randomPin, usernameGuess;
 import 'tests_screens.dart' show Tick, classTests;
 
 int _n(Object? v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
@@ -263,7 +262,7 @@ class _CourseScreenState extends State<CourseScreen> with WidgetsBindingObserver
       else if (_tab == 1)
         LibraryTab(shelf: LibShelf.course(widget.id), className: _name, reload: _loads)
       else ...[
-        if (people.isEmpty) Fig('No one is in this course yet. Add the people who join it.', style: bodyStyle.copyWith(color: muted)),
+        if (people.isEmpty) Fig('No one is in this course yet. Invite students with its link, or add your own.', style: bodyStyle.copyWith(color: muted)),
         for (final (i, s) in people.indexed) ...[
           if (i > 0) const SizedBox(height: gapRow),
           RowTile(
@@ -279,7 +278,10 @@ class _CourseScreenState extends State<CourseScreen> with WidgetsBindingObserver
           ),
         ],
         const SizedBox(height: gapRow),
-        SecondaryButton('Add people', icon: Ph.userPlus, onTap: () => _go('/t/courses/${widget.id}/add?name=${_enc(_name)}')),
+        // New students ask to join with the course's link; students the tuition has already are added from the list.
+        SecondaryButton('Invite students', icon: Ph.linkSimple, onTap: () => _go('/t/invite?course=${widget.id}&name=${_enc(_name)}')),
+        const SizedBox(height: gapRow),
+        SecondaryButton('Add your students', icon: Ph.userPlus, onTap: () => _go('/t/courses/${widget.id}/add?name=${_enc(_name)}')),
       ],
       const SizedBox(height: 22),
       Center(child: TextAction('Delete this course', color: danger, onTap: _delete)),
@@ -309,8 +311,8 @@ class _RenameLink extends StatelessWidget {
 
 // ---------------------------------------------------------------- add people
 
-/// Puts people in a course: students the tuition already has (from any class), or a new person who is only in
-/// this course. Adding someone here never takes them out of their groups.
+/// Puts students the tuition already has (from any class) in a course. Adding someone here never takes them out of their
+/// groups. New students ask to join with the course's link instead (invite_screen.dart): they make their own logins.
 class AddPeopleScreen extends StatefulWidget {
   const AddPeopleScreen({super.key, required this.courseId, required this.courseName});
   final String courseId;
@@ -330,9 +332,6 @@ List<(String, String)> _groupsOf(Map<String, dynamic> s) {
 }
 
 class _AddPeopleScreenState extends State<AddPeopleScreen> {
-  int _tab = 0;
-
-  // From your students
   List<Map<String, dynamic>>? _students;
   String? _error;
   final _search = TextEditingController();
@@ -341,14 +340,6 @@ class _AddPeopleScreenState extends State<AddPeopleScreen> {
   String? _group;
   final Set<String> _picked = {};
   bool _adding = false;
-
-  // New person
-  final _name = TextEditingController();
-  final _username = TextEditingController();
-  bool _usernameEdited = false;
-  String _pin = randomPin();
-  int _suggestSeq = 0;
-  bool _creating = false;
 
   @override
   void initState() {
@@ -359,8 +350,6 @@ class _AddPeopleScreenState extends State<AddPeopleScreen> {
   @override
   void dispose() {
     _search.dispose();
-    _name.dispose();
-    _username.dispose();
     super.dispose();
   }
 
@@ -442,59 +431,14 @@ class _AddPeopleScreenState extends State<AddPeopleScreen> {
     }
   }
 
-  /// The login to suggest for the name typed: a guess at once, then the server's word on what is free.
-  void _suggest(String name) {
-    if (_usernameEdited) return;
-    _username.text = usernameGuess(name);
-    setState(() {});
-    final seq = ++_suggestSeq;
-    if (name.trim().isEmpty) return;
-    Future<void>.delayed(const Duration(milliseconds: 350), () async {
-      if (!mounted || seq != _suggestSeq || _usernameEdited) return;
-      try {
-        final r = await api.get('/teacher/username-suggestion?name=${Uri.encodeQueryComponent(name.trim())}');
-        if (mounted && seq == _suggestSeq && !_usernameEdited) setState(() => _username.text = '${r['username']}');
-      } on ApiException {
-        // Keep the guess made on the phone; the server also fixes a taken login when it is created.
-      }
-    });
-  }
-
-  String? get _missingNew {
-    if (_name.text.trim().isEmpty) return 'Type the person\'s name.';
-    if (!RegExp(r'^[a-z0-9._]{3,24}$').hasMatch(_username.text.trim())) return 'Usernames need 3 to 24 lowercase letters, numbers or dots.';
-    return null;
-  }
-
-  Future<void> _create() async {
-    setState(() => _creating = true);
-    try {
-      final r = await api.post('/teacher/courses/${widget.courseId}/people/new', {
-        'display_name': _name.text.trim(),
-        'username': _username.text.trim(),
-        'pin': _pin,
-      });
-      if (!mounted) return;
-      final login = r['login'] as Map<String, dynamic>;
-      await showLoginCard(context, name: _name.text.trim(), username: '${login['username']}', pin: '${login['pin']}');
-      if (mounted) context.pop(true);
-    } on ApiException catch (e) {
-      if (mounted) showProblem(context, e);
-    } finally {
-      if (mounted) setState(() => _creating = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) => PushedPanel(
         kicker: widget.courseName,
-        title: 'Add people',
-        footer: _tab == 0 ? _existingFooter() : _newFooter(),
+        title: 'Add your students',
+        footer: _existingFooter(),
         children: [
           const SizedBox(height: 18),
-          SegmentedToggle(labels: const ['From your students', 'New person'], index: _tab, onChanged: (i) => setState(() => _tab = i)),
-          const SizedBox(height: 16),
-          if (_tab == 0) ..._existing() else ..._newPerson(),
+          ..._existing(),
         ],
       );
 
@@ -520,7 +464,7 @@ class _AddPeopleScreenState extends State<AddPeopleScreen> {
       return [if (_error != null) ErrorState(message: _error!, onRetry: _load) else const LoadingState(rows: 4)];
     }
     if (all.isEmpty) {
-      return const [EmptyState(icon: Ph.users, title: 'No students yet', body: 'Add students in a group first, or make a new person here.')];
+      return const [EmptyState(icon: Ph.users, title: 'No students yet', body: 'Students who joined your tuition show here. Invite new ones with the course\'s link.')];
     }
     final shown = all.where(_matches).toList();
     final selectable = shown.where((s) => !_inCourse(s)).toList();
@@ -570,48 +514,4 @@ class _AddPeopleScreenState extends State<AddPeopleScreen> {
     );
     return already ? Opacity(opacity: 0.6, child: row) : row;
   }
-
-  // ------------------------------------------------------------ new person
-
-  Widget _newFooter() {
-    final missing = _missingNew;
-    return PrimaryButton('Create login', busy: _creating, onTap: missing == null ? _create : null, disabledReason: _creating ? null : missing);
-  }
-
-  List<Widget> _newPerson() => [
-        GroupedInputs(children: [
-          BareField(
-            controller: _name,
-            placeholder: 'Full name',
-            maxLength: 60,
-            capitalization: TextCapitalization.words,
-            action: TextInputAction.done,
-            onChanged: _suggest,
-          ),
-        ]),
-        const FormLabel('Login'),
-        GroupedInputs(children: [
-          BareField(
-            controller: _username,
-            placeholder: 'Username',
-            maxLength: 24,
-            keyboard: TextInputType.visiblePassword,
-            onChanged: (_) => setState(() => _usernameEdited = true),
-          ),
-        ]),
-        const SizedBox(height: 10),
-        Surface(
-          shadow: e1,
-          padding: const EdgeInsets.fromLTRB(17, 12, 10, 12),
-          child: Row(children: [
-            Text('PIN', style: bodyStyle.copyWith(color: muted)),
-            const Spacer(),
-            Text(_pin, style: numStyle(size: 22, weight: FontWeight.w600).copyWith(letterSpacing: 5)),
-            const SizedBox(width: 10),
-            CircleBtn(icon: Ph.arrowsClockwise, label: 'New PIN', ground: fill, onTap: () => setState(() => _pin = randomPin())),
-          ]),
-        ),
-        const SizedBox(height: 16),
-        InlineNotice('A new person is only in this course. They are not added to any group.', tone: Tone.neutral, icon: Ph.info),
-      ];
 }

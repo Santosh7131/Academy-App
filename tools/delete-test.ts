@@ -174,7 +174,7 @@ try {
   // ---------------------------------------------------------------- the owner deletes it
   const ok = await del(A.T, { secret: PASSWORD });
   check('the owner deletes the tuition with their password', ok.status === 200 && ok.body.ok === true, ok.body);
-  check('the owner is told their account went too', ok.body?.account_deleted === true && ok.body?.accounts_deleted === 3, ok.body);
+  check('the owner is told their account went too, with the helper\'s', ok.body?.account_deleted === true && ok.body?.accounts_deleted === 2, ok.body);
   check('the tuition is gone', (await n('select count(*) as n from tuitions where id = $1', [A.tuition])) === 0);
   for (const [table, sql] of [
     ['tests', 'select count(*) as n from tests where tuition_id = $1'],
@@ -186,8 +186,9 @@ try {
   ] as const) {
     check(`none of its ${table} are left`, (await n(sql, sql.includes('$1') ? [A.tuition] : [])) === 0);
   }
-  check('the owner, the helper and the student who was only there lose their accounts',
-    (await n('select count(*) as n from users where id = any($1::uuid[])', [[A.user, helper, only]])) === 0);
+  check('the owner and the helper lose their accounts', (await n('select count(*) as n from users where id = any($1::uuid[])', [[A.user, helper]])) === 0);
+  // Students make their own logins: one who was only in this tuition keeps it, with no tuition, to join another or delete.
+  check('the student who was only there keeps their account', (await n('select count(*) as n from users where id = $1', [only])) === 1);
   check('the student who is also in B keeps the account', (await n('select count(*) as n from users where id = $1', [both])) === 1);
   check('someone who had only asked to join keeps their account', (await n('select count(*) as n from users where id = $1', [asker])) === 1);
   check('and their place in B', (await n(`select count(*) as n from memberships where user_id = $1 and tuition_id = $2 and status = 'active'`, [both, B.tuition])) === 1);
@@ -196,7 +197,8 @@ try {
 
   const gone = await api('GET', '/teacher/home', A.T);
   check('the owner\'s old login stops working', gone.status === 401, gone.body);
-  check('so does the deleted student\'s', (await api('GET', '/student/home', S_ONLY)).status === 401);
+  const onlyHome = await api('GET', '/student/home', S_ONLY);
+  check('the student who was only there is signed in still, to no tuition', onlyHome.status === 409 && code(onlyHome) === 'no_tuition', onlyHome.body);
   const stillB = await api('GET', '/student/home', S_BOTH, undefined, { 'x-tuition': B.tuition });
   check('the student in B still uses B', stillB.status === 200, stillB.body);
   check('B\'s owner still works', (await api('GET', '/teacher/home', B.T)).status === 200);

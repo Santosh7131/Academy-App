@@ -1,8 +1,6 @@
 import { waitUntil } from '@neon/functions';
 import { Hono } from 'hono';
-import {
-  checkPassword, checkPin, checkUsername, hashSecret, killSessions, LOCK_MINUTES, lockedError, newPin, takeTry, tokenHash, tuitionOf, verifySecret, type AppEnv,
-} from '../lib/auth.ts';
+import { checkPassword, checkUsername, hashSecret, killSessions, tuitionOf, type AppEnv } from '../lib/auth.ts';
 import { assignedCte, EVERYONE_DONE, resultPayload, TEST_COUNTS } from '../lib/attempts.ts';
 import { knowsCourses, knowsMoreOptions, knowsSimpleHome } from '../lib/client.ts';
 import { courseCards, ownCourse } from '../lib/courses.ts';
@@ -14,7 +12,6 @@ import { assertLevel, CLASS_MIN, CUSTOM_MAX, levelIn, levelLabel, levelParam } f
 import { groupFileCount, groupLibraryCount, subjectFileCount } from '../lib/library.ts';
 import { afterTestChange, remindStudents } from '../lib/notify.ts';
 import { MAX_OPTIONS, MIN_OPTIONS } from '../lib/options.ts';
-import { pushConfigured, pushToUsers } from '../lib/push.ts';
 import { difficultyOf, mustKeepOrder, type Difficulty } from '../lib/questions.ts';
 import { closeTest, staleTests } from '../lib/stale.ts';
 import { declaredSize, deleteObjects, maybeViewUrl, uploadUrl } from '../lib/storage.ts';
@@ -23,8 +20,9 @@ import {
   defaultSubject, elsewhere, ensureGroup, memberStudents, newImageKey, ownImageKey, ownQuestions, refreshLogin, taughtSubject,
   taughtSubjectIds,
 } from '../lib/tuition.ts';
-import { createWithLogin, pinOf, planLogin } from '../lib/students.ts';
+import { createWithLogin, pinOf, planLogin, tutorMadeLoginsOff } from '../lib/students.ts';
 import { freeUsername, latinName } from '../lib/usernames.ts';
+import { changePassword } from './auth.ts';
 import { readBody } from './body.ts';
 
 // Mounted behind requireUser('teacher') in index.ts, which also gives every request its tuition:
@@ -186,13 +184,19 @@ async function setStudentSubjects(cx: any, tuition: string, studentId: string, i
   if (m && m.class_level != null) for (const id of ids) await ensureGroup(tuition, m.class_level, id, cx);
 }
 
-/** The login to suggest for a student of this name, free right now: two called Harini Venkatesh get harini.v and harini.v.2. */
+/**
+ * The login to suggest for a student of this name, free right now: two called Harini Venkatesh get harini.v and harini.v.2.
+ * Only for a tutor making a student's login, so it is off wherever that is (and spends no AI call there).
+ */
 teacherRoutes.get('/username-suggestion', async (c) => {
+  tutorMadeLoginsOff();
   const name = await latinName((c.req.query('name') ?? '').slice(0, 60), c.get('user').id, tuitionOf(c).id);
   return c.json({ username: await freeUsername(name) });
 });
 
+/** A tutor makes a student's login. Test database only: students make their own (lib/students.ts, tutorMadeLoginsOff). */
 teacherRoutes.post('/students', async (c) => {
+  tutorMadeLoginsOff();
   const T = tuitionOf(c).id;
   const b = await readBody(c);
   const displayName = str(b, 'display_name', { max: 60 })!;
@@ -317,35 +321,13 @@ teacherRoutes.patch('/students/:id', async (c) => {
   return c.json({ student: u });
 });
 
-teacherRoutes.post('/students/:id/reset-pin', async (c) => {
-  const t = tuitionOf(c);
-  const id = uuid(c.req.param('id'), 'student id');
-  const b = await readBody(c);
-  const pin = b.pin ? checkPin(b.pin) : newPin();
-  const { hash, salt } = await hashSecret(pin);
-  const own = await tq1(
-    t.id,
-    `select 1 as x from memberships where tuition_id = @T and user_id = $1 and role = 'student' and status in ('active', 'off')`,
-    [id],
-  );
-  if (!own) throw notFound('This student');
-  const u = await q1(
-    `update users set secret_hash = $2, secret_salt = $3, failed_count = 0, locked_until = null
-      where id = $1 and role = 'student' returning username`,
-    [id, hash, salt],
-  );
-  // A student who learns with other tutors too is told who changed the PIN, before every phone is signed out.
-  if (pushConfigured() && (await elsewhere(t.id, id))) {
-    await pushToUsers([id], { title: 'Your PIN was changed', body: `${t.name} set a new PIN for your login.` }).catch(() => 0);
-  }
-  await killSessions(id);
-  return c.json({ login: { username: u.username, pin } });
-});
+// No tutor sets a student's password or PIN (POST /students/:id/reset-pin is gone, 22 Nov 2026): the account is the
+// student's own, shared across tuitions, and a new secret from any one tutor would let that tutor log in as the student.
 
 /**
- * Takes a student out of this tuition, with their results in it. A student who is nowhere else is
- * deleted with their login; one who learns with another tutor too keeps their login and the rest.
- * Turning the student off instead keeps the results.
+ * Takes a student out of this tuition, with their results in it. Their login stays: students make their own, so
+ * it is theirs to keep, to join another tuition with, or to delete (POST /auth/delete-account). Turning the
+ * student off instead keeps the results.
  */
 teacherRoutes.delete('/students/:id', async (c) => {
   const T = tuitionOf(c).id;
@@ -358,11 +340,7 @@ teacherRoutes.delete('/students/:id', async (c) => {
       cx,
     );
     if (!own) return false;
-    const other = await tq1(T, 'select 1 as x from memberships where user_id = $1 and tuition_id <> @T', [id], cx);
-    if (!other) {
-      await cx.query(`delete from users where id = $1 and role = 'student'`, [id]);
-      return true;
-    }
+    await tq(T, 'delete from join_requests where tuition_id = @T and student_id = $1', [id], cx);
     await tq(T, 'delete from attempts a using tests t where t.id = a.test_id and t.tuition_id = @T and a.student_id = $1', [id], cx);
     await tq(T, 'delete from test_students ts using tests t where t.id = ts.test_id and t.tuition_id = @T and ts.student_id = $1', [id], cx);
     await tq(T, 'delete from retake_grants g using tests t where t.id = g.test_id and t.tuition_id = @T and g.student_id = $1', [id], cx);
@@ -386,7 +364,7 @@ teacherRoutes.post('/students/:id/active', async (c) => {
     [id, active ? 'active' : 'off'],
   );
   if (!m) throw notFound('This student');
-  // The login itself goes off only when this was the student's last place.
+  // Only a tutor's login goes off with their last place (lib/tuition.ts, refreshLogin): a student's stays theirs.
   const loginOn = await refreshLogin(id);
   if (!active && !loginOn) await killSessions(id);
   else if (active) waitUntil(afterTestChange());
@@ -579,8 +557,11 @@ teacherRoutes.get('/home', async (c) => {
   out.sort((a, b) => a.class_level - b.class_level || a.subject.localeCompare(b.subject));
   const meta = await tq1(
     T,
+    // Everyone waiting, once each: students who asked to join with the tuition's code, and students (new or already in) who asked
+    // for a group or course with its link.
     `select now() as now, (select join_code from tuitions where id = @T) as join_code,
-            (select count(*) from memberships where tuition_id = @T and role = 'student' and status = 'pending') as pending`,
+            (select count(*) from (select user_id from memberships where tuition_id = @T and role = 'student' and status = 'pending'
+                                   union select student_id from join_requests where tuition_id = @T) w) as pending`,
   );
   // AI credit, for the balance on Home and the note when it has run out (lib/credit.ts).
   const credit = await balanceOf(T);
@@ -1397,26 +1378,8 @@ teacherRoutes.patch('/settings', async (c) => {
   return c.json({ ok: true });
 });
 
-/**
- * A new password. The current one has to be right, and wrong guesses count toward the same lock as at login, so a stolen
- * phone's session cannot be used to guess the password at leisure. Every other phone is signed out: a password changed
- * because a phone was lost must end the lost phone's session too.
- */
-teacherRoutes.post('/password', async (c) => {
-  const b = await readBody(c);
-  const id = c.get('user').id;
-  const me = await q1('select secret_hash, secret_salt from users where id = $1', [id]);
-  const t = await takeTry(id);
-  if (t.locked) throw lockedError(t.minutes);
-  if (!(await verifySecret(String(b.current ?? ''), me.secret_hash, me.secret_salt))) {
-    if (t.lastTry) throw lockedError(LOCK_MINUTES);
-    throw new HttpError(400, 'wrong_password', 'Your current password is not right.');
-  }
-  const { hash, salt } = await hashSecret(checkPassword(b.next));
-  await pool.query('update users set secret_hash = $2, secret_salt = $3, failed_count = 0, locked_until = null where id = $1', [id, hash, salt]);
-  await pool.query('delete from sessions where user_id = $1 and token_hash <> $2', [id, tokenHash((c.req.header('authorization') ?? '').slice(7).trim())]);
-  return c.json({ ok: true });
-});
+/** A new password: the same as POST /auth/password, where the rules are. */
+teacherRoutes.post('/password', changePassword);
 
 /** Removes everything the seed created in this tuition. Real students, questions and tests are untouched. */
 teacherRoutes.delete('/sample-data', async (c) => {

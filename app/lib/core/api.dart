@@ -43,7 +43,7 @@ class Api {
   /// person's first tuition, which is all a person with one needs.
   String? tuitionId;
 
-  /// Called when the server says the session is gone (password reset, login turned off).
+  /// Called when the server says the session is gone (the password changed on another phone, the login turned off).
   void Function()? onSignedOut;
 
   /// Called when the server says the person is no longer in the tuition the app was showing.

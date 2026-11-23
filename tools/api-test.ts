@@ -650,21 +650,26 @@ try {
   const pd = await api('DELETE', `/teacher/papers/${npId}`, T);
   check('deleting a paper deletes the questions saved from it that no test uses', pd.status === 200 && pd.body?.questions_deleted === 2, pd.body);
 
-  // Lockout, PIN reset and deactivation.
+  // Lockout and deactivation.
   let last = 0;
   for (let i = 0; i < 5; i++) last = (await login(`${tag}.two`, '0000')).status;
   check('fifth wrong PIN locks the login', last === 429);
   check('right PIN is refused while locked', (await login(`${tag}.two`, '5678')).status === 429);
-  const reset = await api('POST', `/teacher/students/${created.users[1]}/reset-pin`, T, { pin: '2468' });
-  check('teacher resets the PIN', reset.status === 200 && reset.body.login.pin === '2468', reset.body);
-  check('old session stops working after reset', (await api('GET', '/student/home', S2)).status === 401);
-  check('new PIN works and the lock is cleared', (await login(`${tag}.two`, '2468')).status === 200);
+  // No tutor can lift a lock with a new PIN any more: it runs out by itself, or the developer lifts it (checked below, where
+  // there is a developer login). Lifted here so those checks can log in as this student.
+  const ldb = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await ldb.connect();
+  await ldb.query('update users set failed_count = 0, locked_until = null where id = $1', [created.users[1]]);
+  await ldb.end();
+  // Turned off in their only tuition, a student keeps their login (students make their own) but reaches no tuition with it.
   await api('POST', `/teacher/students/${created.users[0]}/active`, T, { active: false });
-  check('deactivated student cannot log in', (await login(`${tag}.one`, '1234')).status === 403);
-  check('a wrong PIN on a turned-off login does not say it is turned off', (await login(`${tag}.one`, '0000')).status === 401);
+  const offHome = await api('GET', '/student/home', S1);
+  check('a turned-off student reaches the tuition no more', offHome.status === 409 && offHome.body?.error?.code === 'no_tuition', offHome.body);
+  const offLogin = await login(`${tag}.one`, '1234');
+  check('but can still log in, to see that or join another tuition', offLogin.status === 200 && offLogin.body.tuitions.length === 0, offLogin.body);
+  check('a wrong PIN is still refused', (await login(`${tag}.one`, '0000')).status === 401);
   for (let k = 0; k < 4; k++) await login(`${tag}.one`, '0001');
   check('and wrong guesses at it lock it like any other login', (await login(`${tag}.one`, '1234')).status === 429);
-  check('deactivated student session stops working', (await api('GET', '/student/home', S1)).status === 401);
 
   // Deleting: a question nobody has written leaves its tests; a written test goes only when asked twice.
   const dq = await api('POST', '/teacher/questions', T, { class_level: 9, text: `${tag} delete me`, options: ['a', 'b', 'c', 'd'], correct_option: 0 });
@@ -681,8 +686,11 @@ try {
   check('and then deletes it with its results', delA2.status === 200 && (await api('GET', `/teacher/attempts/${st1.body.attempt.id}`, T)).status === 404, delA2.body);
   check('a test nobody has written deletes at once', (await api('DELETE', `/teacher/tests/${delTest.body.id}`, T)).status === 200);
   const sd = await api('POST', '/teacher/students', T, { display_name: 'Test Delete Me', class_level: 9, username: `${tag}.del`, pin: '1357' });
+  created.users.push(sd.body.student.id);
   const sdd = await api('DELETE', `/teacher/students/${sd.body.student.id}`, T);
-  check('a student can be deleted, and their login stops working', sdd.status === 200 && (await login(`${tag}.del`, '1357')).status !== 200, sdd.body);
+  const sdLogin = await login(`${tag}.del`, '1357');
+  check('a student can be taken out of the tuition, and keeps their own login with no tuition in it',
+    sdd.status === 200 && sdLogin.status === 200 && sdLogin.body.tuitions.length === 0, { removed: sdd.body, login: sdLogin.body });
 
   // Two students with one name: the second gets the next free username on its own.
   const twinIds: string[] = [];
@@ -701,7 +709,9 @@ try {
     (await api('GET', '/teacher/username-suggestion?name=Zqx%20Twin', T)).body?.username === 'zqx.t.4');
   const typed = await api('POST', '/teacher/students', T, { display_name: 'Someone Else', class_level: 9, username: 'zqx.t', pin: '3333' });
   check('a username typed by hand that is taken is still refused', typed.status === 409 && typed.body?.error?.code === 'username_taken', typed.body);
+  // Taking them out of the tuition keeps their logins (students' own), so the clean-up at the end deletes those.
   for (const id of twinIds) await api('DELETE', `/teacher/students/${id}`, T);
+  created.users.push(...twinIds);
 
   // The developer's admin app (skipped where there is no developer login in the logins file).
   if (logins.developer) {
@@ -712,7 +722,7 @@ try {
     check('the teacher cannot open the admin app', (await api('GET', '/admin/overview', T)).status === 403);
     // A student logs in from a phone that says what it is, as the app does from 1.2.1.
     const phone = { 'x-install-id': `${tag}-phone-a`, 'x-app': 'tuition_app/1.2.1+4', 'x-device': 'samsung SM-M146B', 'x-os': 'Android 14 (SDK 34)' };
-    const p1 = await api('POST', '/auth/login', undefined, { username: `${tag}.two`, secret: '2468' }, phone);
+    const p1 = await api('POST', '/auth/login', undefined, { username: `${tag}.two`, secret: '5678' }, phone);
     check('a student logs in from a phone that reports itself', p1.status === 200, p1.body);
     const P1 = p1.body?.token as string;
     await api('POST', '/auth/login', undefined, { username: `${tag}.two`, secret: '0000' }, phone);
@@ -730,7 +740,7 @@ try {
     check('the phone is signed out', (await api('GET', '/student/home', P1)).status === 401);
     for (let i = 0; i < 5; i++) await login(`${tag}.two`, '0000');
     const un = await api('POST', `/admin/people/${created.users[1]}/unlock`, D);
-    check('the developer unlocks a locked login', un.status === 200 && (await login(`${tag}.two`, '2468')).status === 200, un.body);
+    check('the developer unlocks a locked login', un.status === 200 && (await login(`${tag}.two`, '5678')).status === 200, un.body);
     const srv = await api('GET', '/admin/server', D);
     check('the server page measures the database and storage',
       srv.status === 200 && srv.body?.database?.bytes > 0 && typeof srv.body?.storage?.files === 'number', srv.body?.database);

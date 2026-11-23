@@ -12,178 +12,6 @@ import 'common.dart';
 import 'subjects.dart';
 import '../../core/levels.dart';
 
-/// A new login's PIN: four random digits.
-String randomPin() => Random.secure().nextInt(10000).toString().padLeft(4, '0');
-
-/// "Harini Venkatesh" -> "harini.v": the login to suggest on the phone while the server works out the final one.
-/// A name in Tamil or Hindi has no suggestion here, the server spells it in English letters.
-String usernameGuess(String name) {
-  final parts = name.toLowerCase().replaceAll(RegExp(r'[^a-z\s]'), '').trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty).toList();
-  return parts.isEmpty ? '' : (parts.length == 1 ? parts.first : '${parts.first}.${parts.last[0]}');
-}
-
-// ---------------------------------------------------------------- add
-
-class AddStudentScreen extends StatefulWidget {
-  /// From a group's page: its class and subject are already chosen.
-  const AddStudentScreen({super.key, this.classLevel, this.subjectId});
-  final int? classLevel;
-  final String? subjectId;
-
-  @override
-  State<AddStudentScreen> createState() => _AddStudentScreenState();
-}
-
-class _AddStudentScreenState extends State<AddStudentScreen> {
-  final _name = TextEditingController();
-  final _username = TextEditingController();
-  bool _usernameEdited = false;
-  int? _class;
-  List<Subject> _subjects = [];
-  Set<String> _subjectIds = {};
-  String _pin = randomPin();
-  bool _busy = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _class = widget.classLevel;
-    _loadSubjects();
-  }
-
-  Future<void> _loadSubjects() async {
-    try {
-      final subjects = await loadSubjects();
-      if (mounted) {
-        setState(() {
-          _subjects = subjects;
-          // The group's subject; otherwise most students take maths.
-          _subjectIds = widget.subjectId != null ? {widget.subjectId!} : {for (final x in subjects) if (x.isDefault) x.id};
-        });
-      }
-    } on ApiException catch (e) {
-      if (mounted) showProblem(context, e);
-    }
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _username.dispose();
-    super.dispose();
-  }
-
-  int _suggestSeq = 0;
-
-  /// "Harini Venkatesh" -> "harini.v", and "harini.v.2" for a second one: the server knows which are taken, so it
-  /// has the last word a moment after the typing stops. The tutor never has to think of a login.
-  void _suggest(String name) {
-    if (_usernameEdited) return;
-    _username.text = usernameGuess(name);
-    setState(() {});
-    final seq = ++_suggestSeq;
-    if (name.trim().isEmpty) return;
-    Future<void>.delayed(const Duration(milliseconds: 350), () async {
-      if (!mounted || seq != _suggestSeq || _usernameEdited) return;
-      try {
-        final r = await api.get('/teacher/username-suggestion?name=${Uri.encodeQueryComponent(name.trim())}');
-        if (mounted && seq == _suggestSeq && !_usernameEdited) setState(() => _username.text = '${r['username']}');
-      } on ApiException {
-        // Keep the suggestion made on the phone; the server also fixes a taken one when the login is created.
-      }
-    });
-  }
-
-  String? get _missing {
-    if (_name.text.trim().isEmpty) return 'Type the student\'s name.';
-    if (_class == null) return 'Choose a class.';
-    if (_subjectIds.isEmpty) return 'Choose at least one subject.';
-    if (!RegExp(r'^[a-z0-9._]{3,24}$').hasMatch(_username.text.trim())) return 'Usernames need 3 to 24 lowercase letters, numbers or dots.';
-    return null;
-  }
-
-  Future<void> _create() async {
-    setState(() => _busy = true);
-    try {
-      final r = await api.post('/teacher/students', {
-        'display_name': _name.text.trim(),
-        'class_level': _class,
-        'username': _username.text.trim(),
-        'pin': _pin,
-        'subject_ids': _subjectIds.toList(),
-      });
-      if (!mounted) return;
-      final login = r['login'] as Map<String, dynamic>;
-      await showLoginCard(context, name: _name.text.trim(), username: '${login['username']}', pin: '${login['pin']}');
-      if (mounted) context.pop();
-    } on ApiException catch (e) {
-      if (mounted) showProblem(context, e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final missing = _missing;
-    return PushedPanel(
-      kicker: 'New student',
-      title: 'Add student',
-      footer: PrimaryButton(
-        'Create login',
-        busy: _busy,
-        onTap: missing == null ? _create : null,
-        disabledReason: _busy ? null : missing,
-      ),
-      children: [
-        const SizedBox(height: 22),
-        GroupedInputs(children: [
-          BareField(
-            controller: _name,
-            placeholder: 'Full name',
-            maxLength: 60,
-            capitalization: TextCapitalization.words,
-            action: TextInputAction.done,
-            onChanged: _suggest,
-          ),
-        ]),
-        const FormLabel('Class'),
-        ClassField(value: _class, onChanged: (c) => setState(() => _class = c)),
-        const FormLabel('Subjects'),
-        SubjectToggles(subjects: _subjects, value: _subjectIds, onChanged: (v) => setState(() => _subjectIds = v)),
-        if (_class != null && _subjectIds.isNotEmpty) ...[
-          const SizedBox(height: 10),
-          Fig('Joins ${[for (final x in _subjects) if (_subjectIds.contains(x.id)) groupName(_class!, x.name)].join(' and ')}.', style: labelStyle),
-        ],
-        const FormLabel('Login'),
-        GroupedInputs(children: [
-          BareField(
-            controller: _username,
-            placeholder: 'Username',
-            maxLength: 24,
-            keyboard: TextInputType.visiblePassword,
-            onChanged: (_) => setState(() => _usernameEdited = true),
-          ),
-        ]),
-        const SizedBox(height: 10),
-        Surface(
-          shadow: e1,
-          padding: const EdgeInsets.fromLTRB(17, 12, 10, 12),
-          child: Row(children: [
-            Text('PIN', style: bodyStyle.copyWith(color: muted)),
-            const Spacer(),
-            Text(_pin, style: numStyle(size: 22, weight: FontWeight.w600).copyWith(letterSpacing: 5)),
-            const SizedBox(width: 10),
-            CircleBtn(icon: Ph.arrowsClockwise, label: 'New PIN', ground: fill, onTap: () => setState(() => _pin = randomPin())),
-          ]),
-        ),
-      ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------- detail
-
 class StudentDetailScreen extends StatefulWidget {
   const StudentDetailScreen({super.key, required this.id, this.courseId, this.courseName});
   final String id;
@@ -228,23 +56,6 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsB
     }
   }
 
-  Future<void> _resetPin(Map<String, dynamic> s) async {
-    final ok = await confirmCard(
-      context,
-      title: 'Reset the PIN?',
-      body: '${s['display_name']} will be logged out and will need the new PIN.',
-      confirm: 'Reset PIN',
-    );
-    if (!ok) return;
-    try {
-      final r = await api.post('/teacher/students/${widget.id}/reset-pin', {});
-      if (!mounted) return;
-      await showLoginCard(context, name: '${s['display_name']}', username: '${r['login']['username']}', pin: '${r['login']['pin']}');
-    } on ApiException catch (e) {
-      if (mounted) showProblem(context, e);
-    }
-  }
-
   Future<void> _editSubjects(Map<String, dynamic> s) async {
     final List<Subject> subjects;
     try {
@@ -285,10 +96,11 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsB
     final active = s['active'] == true;
     final ok = await confirmCard(
       context,
-      title: active ? 'Turn off this login?' : 'Turn this login back on?',
+      // The account is the student's own: turning them off closes this tuition to them, and nothing else.
+      title: active ? 'Turn off in this tuition?' : 'Turn back on?',
       body: active
-          ? '${s['display_name']} will be logged out and cannot log in until you turn it back on. Their results are kept.'
-          : '${s['display_name']} will be able to log in again with the same PIN.',
+          ? '${s['display_name']} keeps their own account, but cannot see this tuition or its tests until you turn them back on. Their results are kept.'
+          : '${s['display_name']} will see this tuition and its tests again.',
       confirm: active ? 'Turn off' : 'Turn on',
       destructive: active,
     );
@@ -324,13 +136,14 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsB
     final inCourses = (s['courses'] as List? ?? const []).length;
     final ok = await confirmCard(
       context,
-      title: 'Delete ${s['display_name']}?',
+      title: 'Remove ${s['display_name']}?',
       body: [
-        'Their login${written > 0 ? ' and ${written == 1 ? 'their 1 test result' : 'all $written test results'}' : ''} will be deleted for good.',
+        if (written > 0) 'Their ${written == 1 ? '1 test result' : '$written test results'} here will be deleted for good.',
+        'They keep their own account, and can ask to join again.',
         if (inCourses > 0) 'They are taken out of ${f.count(inCourses, 'course')} too.',
-        if (written > 0) 'To keep the results, turn the login off instead.',
+        if (written > 0) 'To keep the results, turn them off instead.',
       ].join(' '),
-      confirm: 'Delete',
+      confirm: 'Remove',
       destructive: true,
     );
     if (!ok) return;
@@ -342,7 +155,8 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsB
     }
   }
 
-  /// The student's actions, kept off the page: change subjects, reset the PIN, turn the login off, delete.
+  /// The student's actions, kept off the page: change subjects, turn them off here, remove them from the tuition. The
+  /// account is the student's own, so nothing here changes their password.
   Future<void> _menu(Map<String, dynamic> s, int written) async {
     final active = s['active'] == true;
     final inCourses = (s['courses'] as List? ?? const []).length;
@@ -354,13 +168,12 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsB
         if (widget.courseId != null) _MenuRow(icon: Ph.userMinus, label: 'Remove from this course', onTap: () => Navigator.of(ctx).pop('leave')),
         // Subjects decide a person's groups: someone with no class (only in courses) has none to change.
         if (s['class_level'] != null) _MenuRow(icon: Ph.pencilSimple, label: 'Change subjects', onTap: () => Navigator.of(ctx).pop('subjects')),
-        _MenuRow(icon: Ph.key, label: 'Reset PIN', onTap: () => Navigator.of(ctx).pop('pin')),
         _MenuRow(
           icon: active ? Ph.prohibit : Ph.checkCircle,
-          label: active ? 'Turn off login' : 'Turn on login',
+          label: active ? 'Turn off in this tuition' : 'Turn back on',
           onTap: () => Navigator.of(ctx).pop('active'),
         ),
-        _MenuRow(icon: Ph.trash, label: 'Delete student', destructive: true, last: true, onTap: () => Navigator.of(ctx).pop('delete')),
+        _MenuRow(icon: Ph.trash, label: 'Remove from the tuition', destructive: true, last: true, onTap: () => Navigator.of(ctx).pop('delete')),
       ]),
     );
     if (!mounted) return;
@@ -369,8 +182,6 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsB
         await _leaveCourse(s);
       case 'subjects':
         await _editSubjects(s);
-      case 'pin':
-        await _resetPin(s);
       case 'active':
         await _toggleActive(s);
       case 'delete':
@@ -441,8 +252,9 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsB
     return PushedPanel(
       onRefresh: _load,
       kicker: widget.courseId != null
-          ? ['Course', if (widget.courseName != null && widget.courseName!.isNotEmpty) widget.courseName!, if (s['active'] != true) 'login off'].join(' · ')
-          : [className(s['class_level']), ...subjects, if (s['active'] != true) 'login off'].where((p) => p.isNotEmpty).join(' · '),
+          // Turned off here only: the login is the student's own and still works.
+          ? ['Course', if (widget.courseName != null && widget.courseName!.isNotEmpty) widget.courseName!, if (s['active'] != true) 'turned off'].join(' · ')
+          : [className(s['class_level']), ...subjects, if (s['active'] != true) 'turned off'].where((p) => p.isNotEmpty).join(' · '),
       title: '${s['display_name']}',
       headerTrailing: CircleBtn(icon: Ph.dotsThreeVertical, label: 'More', onTap: () => _menu(s, done.length)),
       children: [
@@ -500,19 +312,15 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsB
           Text('No tests yet.', style: bodyStyle.copyWith(color: muted))
         else
           for (final (i, it) in testsShown.indexed) ...[if (i > 0) const SizedBox(height: gapRow), it.$2],
+        // The username, for a student who forgot it. Their password is theirs alone: no tutor can see or change it.
         const SectionRule('Login', padding: EdgeInsets.fromLTRB(0, 26, 0, 11)),
         Surface(
           shadow: e1,
-          padding: const EdgeInsets.fromLTRB(17, 10, 8, 10),
-          child: Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Username', style: labelStyle),
-                const SizedBox(height: 3),
-                Text('${s['username']}', style: numStyle(size: 15, weight: FontWeight.w600)),
-              ]),
-            ),
-            TextAction('Reset PIN', color: ink, onTap: () => _resetPin(s)),
+          padding: const EdgeInsets.fromLTRB(17, 14, 17, 14),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Username', style: labelStyle),
+            const SizedBox(height: 3),
+            Text('${s['username']}', style: numStyle(size: 15, weight: FontWeight.w600)),
           ]),
         ),
       ],

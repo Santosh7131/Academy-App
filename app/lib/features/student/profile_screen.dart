@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../../ui/kit.dart';
 import '../../ui/update_card.dart';
 import '../../core/levels.dart';
+import 'account_cards.dart';
 
 /// Profile for students and the teacher: who is signed in, theme, log out.
 class ProfileScreen extends StatelessWidget {
@@ -34,6 +35,7 @@ class ProfileScreen extends StatelessWidget {
                 shadow: e1,
                 child: Column(children: [
                   fact('Username', '${u['username'] ?? ''}'),
+                  if (session.signedInWithGoogle) ...[line(), fact('Logs in with', 'Google')],
                   // A student's tuitions are listed below; the tutor has no such list here.
                   if (teacher) ...[line(), fact('Tuition', session.tuitionName)],
                 ]),
@@ -57,7 +59,14 @@ class ProfileScreen extends StatelessWidget {
                         ),
                 ],
                 const SizedBox(height: gapRow),
-                SecondaryButton('Join another tuition', icon: Ph.plus, onTap: () => context.push('/s/join')),
+                SecondaryButton('Join with a link or code', icon: Ph.plus, onTap: () => context.push('/s/join')),
+                // The student's own account: they made it, so they change its password and delete it themselves.
+                const SectionRule('Account', padding: EdgeInsets.fromLTRB(0, 26, 0, 12)),
+                if (!session.signedInWithGoogle) ...[
+                  SecondaryButton('Change password', icon: Ph.key, onTap: () => changePasswordCard(context)),
+                  const SizedBox(height: gapRow),
+                ],
+                SecondaryButton('Delete account', icon: Ph.trash, tint: danger, onTap: () => deleteAccountFlow(context)),
               ],
               const SectionRule('Theme', padding: EdgeInsets.fromLTRB(0, 26, 0, 12)),
               SegmentedToggle(
@@ -76,9 +85,9 @@ class ProfileScreen extends StatelessWidget {
                   final ok = await confirmCard(
                     context,
                     title: 'Log out?',
-                    body: teacher
-                        ? 'You will need your username and password to log back in.'
-                        : 'You will need your username and PIN to log back in.',
+                    body: session.signedInWithGoogle
+                        ? 'You can log back in with Google.'
+                        : 'You will need your username and password to log back in.',
                     confirm: 'Log out',
                     destructive: true,
                   );

@@ -76,7 +76,11 @@ async function inParallel<T>(limit: number, items: T[], fn: (x: T) => Promise<vo
 const { default: app } = await import('../api/src/index.ts');
 const routes = [...new Map(app.routes.filter((r) => r.method !== 'ALL').map((r) => [`${r.method} ${r.path}`, r])).values()]
   .map((r) => ({ key: `${r.method} ${r.path}`, method: r.method, path: r.path }));
-const PUBLIC = new Set(['GET /', 'POST /auth/login', 'POST /auth/signup-tutor', 'POST /cron/notify']);
+const PUBLIC = new Set([
+  'GET /', 'POST /auth/login', 'POST /auth/signup-tutor', 'POST /auth/signup-student', 'GET /auth/config', 'POST /auth/google', 'POST /cron/notify',
+  // A join link says what it is for to anyone who has it, before they have a login (routes/links.ts).
+  'GET /join/:code', 'GET /j/:code',
+]);
 
 const tag = `sec${randomInt(1000, 9999)}`;
 const created = { users: [] as string[], tuitions: [] as string[], subjects: [] as string[] };
@@ -88,6 +92,8 @@ type World = {
   question: string; test: string; course: string; paper: string; draft: string; subject: string; chapter: string; attempt: string; level: string;
   /** A section on the group's Library shelf, and a finished file in it (a row only: nothing is stored behind it). */
   section: string; file: string;
+  /** A request to join the group through its link, waiting for a tutor (a row only). */
+  linkRequest: string;
 };
 
 async function makeWorld(suffix: string): Promise<World> {
@@ -130,11 +136,15 @@ async function makeWorld(suffix: string): Promise<World> {
      values ($1, $2, 'notes.pdf', 'pdf', 'application/pdf', 1000, $3, 'ready', now()) returning id`,
     [sec.rows[0].id, mk.body.tuition.id, `library/${tag}/${suffix}/notes.pdf`],
   );
+  const jr = await db.query(
+    'insert into join_requests (tuition_id, student_id, group_id) values ($1, $2, $3) returning id',
+    [mk.body.tuition.id, st.body.student.id, group.rows[0].id],
+  );
   return {
     tuition: mk.body.tuition.id, tutorId: su.body.user.id, T, studentId: st.body.student.id, studentName: `${tag}.p${suffix}`, S,
     question: q.body.id, test: t.body.id, course: co.body.course.id, paper: pa.body.paper.id, draft: dr.rows[0].id, subject: sj.body.subject.id,
     chapter: ch.body.chapter.id, attempt: started.body.attempt.id, level: String(lv.body.level.code),
-    section: sec.rows[0].id, file: fil.rows[0].id,
+    section: sec.rows[0].id, file: fil.rows[0].id, linkRequest: jr.rows[0].id,
   };
 }
 
@@ -158,6 +168,8 @@ async function fingerprint(w: World) {
        union all select 'cs:' || id || name || position from class_sections where tuition_id = $2
        union all select 'cf:' || id || section_id || name || status || position || coalesce(announced_at::text, '') from class_files where tuition_id = $2
        union all select 'tu:' || name || join_code || join_open from tuitions where id = $2
+       union all select 'jl:' || code || coalesce(group_id::text, '') || coalesce(course_id::text, '') from join_links where tuition_id = $2
+       union all select 'jr:' || id || student_id from join_requests where tuition_id = $2
        union all select 'se:' || token_hash from sessions where user_id = any($1::uuid[])
      ) z`,
     [[w.tutorId, w.studentId], w.tuition],
@@ -183,6 +195,12 @@ try {
     if (r.key === 'GET /') check('the root says only what the app needs', res.status === 200 && Object.keys(res.body).sort().join() === 'ai,branch,gemini,name,push', res.body);
     else if (r.key === 'POST /auth/login') check('login with nothing is refused', res.status === 401, res.body);
     else if (r.key === 'POST /auth/signup-tutor') check('sign-up with nothing is refused', res.status === 400, res.body);
+    else if (r.key === 'POST /auth/signup-student') check('a student sign-up with nothing is refused', res.status === 400, res.body);
+    else if (r.key === 'GET /auth/config') check('the sign-in settings say only which Google client to use', res.status === 200 && Object.keys(res.body ?? {}).join() === 'google_client_id', res.body);
+    else if (r.key === 'POST /auth/google') {
+      check('Google sign-in with nothing is refused', (res.status === 403 && code(res) === 'google_off') || (res.status === 400 && code(res) === 'no_token'), res.body);
+    } else if (r.key === 'GET /join/:code') check('a join link that does not exist shows nothing', res.status === 404 && code(res) === 'unknown_link', res.body);
+    else if (r.key === 'GET /j/:code') check('a join link that does not exist opens a page that says so', res.status === 404 && String(res.body).startsWith('<!doctype html>'), res);
     else if (r.key === 'POST /cron/notify') check('the notification trigger refuses a plain caller', res.status === 401 && code(res) === 'not_a_trigger', res.body);
     else check(`${r.key} refuses nobody-at-all`, res.status === 401 && code(res) === 'signed_out', res);
   }
@@ -226,7 +244,6 @@ try {
   const foreign: Record<string, Foreign> = {
     'GET /teacher/students/:id': { who: 'tutor', method: 'GET', path: `/teacher/students/${A.studentId}` },
     'PATCH /teacher/students/:id': { who: 'tutor', method: 'PATCH', path: `/teacher/students/${A.studentId}`, body: { display_name: 'Hijack', class_level: 10 } },
-    'POST /teacher/students/:id/reset-pin': { who: 'tutor', method: 'POST', path: `/teacher/students/${A.studentId}/reset-pin`, body: { pin: '0000' } },
     'DELETE /teacher/students/:id': { who: 'tutor', method: 'DELETE', path: `/teacher/students/${A.studentId}` },
     'POST /teacher/students/:id/active': { who: 'tutor', method: 'POST', path: `/teacher/students/${A.studentId}/active`, body: { active: false } },
     'PATCH /teacher/subjects/:id': { who: 'tutor', method: 'PATCH', path: `/teacher/subjects/${A.subject}`, body: { name: 'Hijack' } },
@@ -300,6 +317,16 @@ try {
     'DELETE /teacher/library/files/:id': { who: 'tutor', method: 'DELETE', path: `/teacher/library/files/${A.file}` },
     'GET /teacher/library/files/:id/url': { who: 'tutor', method: 'GET', path: `/teacher/library/files/${A.file}/url` },
     'GET /student/library/files/:id/url': { who: 'student', method: 'GET', path: `/student/library/files/${A.file}/url` },
+    // Join links: a group's link is named by class and subject inside the caller's own tuition, a course's and a request by id.
+    'GET /teacher/groups/:cls/:subject/link': { who: 'tutor', method: 'GET', path: `/teacher/groups/9/${A.subject}/link` },
+    'POST /teacher/groups/:cls/:subject/link/new': { who: 'tutor', method: 'POST', path: `/teacher/groups/9/${A.subject}/link/new`, body: {} },
+    'GET /teacher/courses/:id/link': { who: 'tutor', method: 'GET', path: `/teacher/courses/${A.course}/link` },
+    'POST /teacher/courses/:id/link/new': { who: 'tutor', method: 'POST', path: `/teacher/courses/${A.course}/link/new`, body: {} },
+    'POST /teacher/link-requests/:id/accept': { who: 'tutor', method: 'POST', path: `/teacher/link-requests/${A.linkRequest}/accept`, body: {} },
+    'POST /teacher/link-requests/:id/decline': { who: 'tutor', method: 'POST', path: `/teacher/link-requests/${A.linkRequest}/decline`, body: {} },
+    // Anyone who has a link may see what it is for (that is what a link is for), so only a code that does not exist is tried here.
+    'GET /join/:code': { who: 'tutor', method: 'GET', path: '/join/AAAAAAAAAA' },
+    'GET /j/:code': { who: 'tutor', method: 'GET', path: '/j/AAAAAAAAAA' },
   };
   const named = routes.filter((r) => r.path.includes(':'));
   for (const r of named) {
@@ -353,7 +380,7 @@ try {
     const idFor = (seg: string) => ({
       students: A!.studentId, questions: A!.question, tests: A!.test, courses: A!.course, papers: A!.paper, attempts: A!.attempt, drafts: A!.draft, subjects: A!.subject,
       chapters: A!.chapter, tutors: A!.tutorId, people: A!.studentId, clients: A!.tuition, levels: A!.level, 'join-requests': A!.studentId,
-      sections: A!.section, files: A!.file,
+      sections: A!.section, files: A!.file, 'link-requests': A!.linkRequest,
     } as Record<string, string>)[seg];
     let path = r.path;
     for (let i = 0; i < segs.length; i++) {
@@ -379,7 +406,7 @@ try {
     // 1. real ids of the first tuition, so the handler goes past the id checks into its own logic: every junk body or query.
     // Destructive calls on real ids are checked elsewhere; here they would only empty the tuition for the calls after them.
     // Deleting the tuition is checked in tools/delete-test.ts: junk here would only spend the tutor's wrong-password tries.
-    const destructive = (r.method === 'DELETE' && hasParams) || /\/(active|reset-pin|publish|join-code|retake)$/.test(r.path) || r.key === 'POST /teacher/tuition/delete';
+    const destructive = (r.method === 'DELETE' && hasParams) || /\/(active|publish|join-code|retake)$/.test(r.path) || r.key === 'POST /teacher/tuition/delete';
     if (!destructive) {
       if (withBody) for (const raw of bodies) fuzzJobs.push({ r, path: own, raw });
       else for (const qs of QUERY_ROUTES.test(r.key) ? queries : ['']) fuzzJobs.push({ r, path: own + qs });
@@ -508,18 +535,18 @@ try {
   check('the new one does', relogin.status === 200, relogin.body);
   A.T = relogin.body.token;
 
-  const phone2 = await login(A.studentName, '4321');
-  const reset = await api('POST', `/teacher/students/${A.studentId}/reset-pin`, A.T, { pin: '5678' });
-  check('a tutor resets a student\'s PIN', reset.status === 200 && reset.body.login.pin === '5678', reset.body);
-  check('every phone of that student is signed out', (await api('GET', '/student/home', A.S)).status === 401 && (await api('GET', '/student/home', phone2.body.token)).status === 401);
-  const back = await login(A.studentName, '5678');
-  A.S = back.body.token;
-  check('the new PIN works', back.status === 200, back.body);
-  const off = await api('POST', `/teacher/students/${A.studentId}/active`, A.T, { active: false });
+  // The account is the student's own: no tutor can give it a new PIN (and with it log in as the student). The route that did is gone.
+  const gone = await api('POST', `/teacher/students/${A.studentId}/reset-pin`, A.T, { pin: '5678' });
+  check('a tutor cannot set a new PIN for a student', gone.status === 404 && code(gone) === 'not_found', gone);
+  check('the student stays signed in, with the PIN they had',
+    (await api('GET', '/student/home', A.S)).status === 200 && (await login(A.studentName, '4321')).status === 200 && (await login(A.studentName, '5678')).status === 401);
+  const off =await api('POST', `/teacher/students/${A.studentId}/active`, A.T, { active: false });
   check('a tutor turns a student off', off.status === 200, off.body);
-  check('the turned-off student\'s phone is signed out at once', (await api('GET', '/student/home', A.S)).status === 401);
-  const offLogin = await login(A.studentName, '5678');
-  check('and told so only when the PIN is right', offLogin.status === 403 && code(offLogin) === 'inactive', offLogin.body);
+  const offHome = await api('GET', '/student/home', A.S);
+  check('the turned-off student\'s phone reaches the tuition no more, at once', offHome.status === 409 && code(offHome) === 'no_tuition', offHome.body);
+  // Students make their own logins, so the login stays theirs: they can sign in, see they are in no tuition, and join another.
+  const offLogin = await login(A.studentName, '4321');
+  check('the student can still sign in, and is in no tuition', offLogin.status === 200 && offLogin.body.tuitions.length === 0, offLogin.body);
   await api('POST', `/teacher/students/${A.studentId}/active`, A.T, { active: true });
 
   const victim = await api('POST', '/teacher/students', A.T, { display_name: 'Lock Test', class_level: 9, username: `${tag}.lock`, pin: '2468', subject_ids: [MATHS] });
@@ -529,8 +556,6 @@ try {
   check('the fifth wrong PIN locks the login', last.status === 429 && code(last) === 'locked', last);
   const whileLocked = await login(`${tag}.lock`, '2468');
   check('even the right PIN is refused while it is locked', whileLocked.status === 429, whileLocked);
-  const unlocked = await api('POST', `/teacher/students/${victim.body.student.id}/reset-pin`, A.T, { pin: '2468' });
-  check('a PIN reset unlocks it', unlocked.status === 200 && (await login(`${tag}.lock`, '2468')).status === 200);
 
   // Guesses sent all at once are counted one by one: of forty wrong PINs together, four are judged and the other thirty-six turned away.
   const burstVictim = await api('POST', '/teacher/students', A.T, { display_name: 'Burst Test', class_level: 9, username: `${tag}.burst`, pin: '1357', subject_ids: [MATHS] });
@@ -552,7 +577,7 @@ try {
   check('signing out ends that session', out.status === 200 && (await api('GET', '/auth/me', A.T)).status === 401);
 
   // ---------------------------------------------------------------- 5. two requests at once
-  const two = await login(A.studentName, '5678');
+  const two = await login(A.studentName, '4321');
   const S2 = two.body.token as string;
   const T3 = (await login(`${tag}.a`, 'newpassword1')).body.token as string;
   const t2 = await api('POST', '/teacher/tests', T3, {

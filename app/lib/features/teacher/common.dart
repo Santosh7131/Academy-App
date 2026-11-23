@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../core/api.dart';
 import '../../core/format.dart' as f;
@@ -290,50 +288,6 @@ class DayTimeChooser extends StatelessWidget {
       );
     });
   }
-}
-
-String loginMessage(String name, String username, String pin) =>
-    '${session.tuitionName} login for $name\n'
-    'Username: $username\n'
-    'PIN: $pin\n'
-    'Open the ${session.tuitionName} app and log in with these.';
-
-/// The login card shown after creating a student or resetting a PIN.
-Future<void> showLoginCard(BuildContext context, {required String name, required String username, required String pin}) {
-  return showCentredCard<void>(
-    context,
-    title: 'Login for ${name.split(' ').first}',
-    builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Surface(
-        shadow: e1,
-        color: fill,
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text('Username', style: labelStyle),
-          const SizedBox(height: 4),
-          Text(username, style: numStyle(size: 22, weight: FontWeight.w600)),
-          const SizedBox(height: 14),
-          Text('PIN', style: labelStyle),
-          const SizedBox(height: 4),
-          Text(pin, style: numStyle(size: 30, weight: FontWeight.w700).copyWith(letterSpacing: 6)),
-        ]),
-      ),
-      const SizedBox(height: 18),
-      Row(children: [
-        Expanded(
-          child: SecondaryButton('Copy', icon: Ph.copy, onTap: () {
-            Clipboard.setData(ClipboardData(text: loginMessage(name, username, pin)));
-          }),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: PrimaryButton('Share', icon: Ph.shareNetwork, onTap: () {
-            SharePlus.instance.share(ShareParams(text: loginMessage(name, username, pin)));
-          }),
-        ),
-      ]),
-    ]),
-  );
 }
 
 /// Shows an API problem in a centred card.

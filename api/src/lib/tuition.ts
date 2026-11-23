@@ -139,12 +139,14 @@ export async function elsewhere(tuition: string, userId: string, db: Db = pool):
 }
 
 /**
- * A person's login is on while they have an active or waiting place somewhere. Turning a member off
- * in one tuition turns the login off only when it was their last place.
+ * A tutor's login is on while they have an active or waiting place somewhere: turning a tutor off in one tuition
+ * turns the login off only when it was their last place. A student's login is always on, because students make
+ * their own: one turned off everywhere can still log in, see that, and join another tuition.
  */
 export async function refreshLogin(userId: string, db: Db = pool): Promise<boolean> {
   const r = await q1<{ active: boolean }>(
-    `update users u set active = exists (select 1 from memberships m where m.user_id = u.id and m.status in ('active', 'pending'))
+    `update users u set active = u.role = 'student'
+                                 or exists (select 1 from memberships m where m.user_id = u.id and m.status in ('active', 'pending'))
       where u.id = $1 returning u.active`,
     [userId],
     db,

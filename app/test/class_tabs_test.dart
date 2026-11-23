@@ -150,14 +150,14 @@ void main() {
       await t.pumpWidget(const SizedBox.shrink());
     });
 
-    testWidgets('the Students tab shows the students and the button to add one; the tests are on the other tab', (t) async {
+    testWidgets('the Students tab shows the students and the button to invite more; the tests are on the other tab', (t) async {
       await _group(t);
       expect(find.text('Student 0'), findsNothing);
-      expect(find.text('Add student'), findsNothing);
+      expect(find.text('Invite students'), findsNothing);
       await _tap(t, find.text('Students'));
       expect(find.text('Student 0'), findsOneWidget);
       expect(find.text('Student 2'), findsOneWidget);
-      expect(find.text('Add student'), findsOneWidget);
+      expect(find.text('Invite students'), findsOneWidget);
       expect(find.text('Open quiz'), findsNothing);
       expect(find.text('Make tests'), findsOneWidget, reason: 'the button stays above the tabs');
       await _tap(t, find.text('Tests'));
@@ -171,7 +171,7 @@ void main() {
       expect(find.text('No tests yet'), findsOneWidget);
       expect(find.text('Remove this group'), findsOneWidget);
       await _tap(t, find.text('Students'));
-      expect(find.text('No students in this group yet.'), findsOneWidget);
+      expect(find.text("No students in this group yet. Invite them with the group's link or QR code."), findsOneWidget);
       expect(find.text('Remove this group'), findsOneWidget);
       await t.pumpWidget(const SizedBox.shrink());
     });
@@ -197,7 +197,7 @@ void main() {
       expect(find.text('Rename course'), findsOneWidget);
       expect(find.text('Make tests'), findsOneWidget);
       expect(find.text('Delete this course'), findsOneWidget);
-      expect(find.text('Add people'), findsNothing);
+      expect(find.text('Invite students'), findsNothing);
       await t.pumpWidget(const SizedBox.shrink());
     });
 
@@ -205,12 +205,13 @@ void main() {
       await _course(t);
       await _tap(t, find.text('People'));
       expect(find.text('Person 0'), findsOneWidget);
-      expect(find.text('Add people'), findsOneWidget);
+      expect(find.text('Invite students'), findsOneWidget);
+      expect(find.text('Add your students'), findsOneWidget);
       expect(find.text('Open quiz'), findsNothing);
       expect(find.text('Rename course'), findsOneWidget);
       expect(find.text('Delete this course'), findsOneWidget);
       double y(String s) => t.getTopLeft(find.text(s)).dy;
-      expect(y('Add people'), lessThan(y('Delete this course')));
+      expect(y('Add your students'), lessThan(y('Delete this course')));
       await t.pumpWidget(const SizedBox.shrink());
     });
 
@@ -218,8 +219,9 @@ void main() {
       await _course(t, tests: [], people: []);
       expect(find.text('No tests yet'), findsOneWidget);
       await _tap(t, find.text('People'));
-      expect(find.text('No one is in this course yet. Add the people who join it.'), findsOneWidget);
-      expect(find.text('Add people'), findsOneWidget);
+      expect(find.text('No one is in this course yet. Invite students with its link, or add your own.'), findsOneWidget);
+      expect(find.text('Invite students'), findsOneWidget);
+      expect(find.text('Add your students'), findsOneWidget);
       await t.pumpWidget(const SizedBox.shrink());
     });
   });

@@ -32,12 +32,16 @@
   everyone is marked again.
 - Every posted test stays in the Bank to post again. A Library shares notes and PDFs. Several tutors
   can share one tuition.
+- Invite students with a group's or course's link or QR code. They make their own accounts and ask
+  to join; you let them in one at a time, or all at once.
 - Prepaid AI credit: ₹2.40 a page read, ₹0.60 a question written, ₹20 free to start. Tests,
   students and marking are free.
 
 **For students**
 
-- Log in with a username and a 4-digit PIN: no email or phone number.
+- Make their own account with a username and password, or with Google. The app keeps no email
+  address or phone number.
+- Join a tutor's group or course by scanning its QR code or opening its link.
 - One question at a time. If the internet drops, the answers stay on the phone until it is back.
 - Marks and the right answers the moment they hand in.
 
@@ -101,7 +105,7 @@ has its own.
 - The deadline is the start time plus the time limit, capped at the test's closing time. The
   server enforces it with 30 seconds of grace, and an attempt that runs out submits itself.
 - One attempt per test, unless the teacher allows a retake.
-- Five wrong PINs lock a login for five minutes.
+- Five wrong passwords lock a login for five minutes.
 - While a student is logged in, release builds block screenshots and screen recording
   (Android's FLAG_SECURE). The teacher's screens can still be captured.
 
@@ -129,12 +133,10 @@ sections, Groups and Courses, built the same way; with no courses it is as descr
 the tuition's courses (see Courses below).
 
 A group (a class and a subject, "10th Maths") has one page: a Make a test button, its tests
-(live, posted, drafts, finished) and its students with an Add student button. Class and subject
-come from the group, so nothing asks for them again. Make a test offers upload or describe it
-to AI. The app has no page of questions: a wrong answer is fixed from the test's own page, which
-marks everyone's attempt again. Add student suggests a username from the name and numbers a
-repeat, so a second Harini Venkatesh gets harini.v.2 without anyone thinking of one (the server
-decides, so the app of 1.3 and before gets it too).
+(live, posted, drafts, finished) and its students with an Invite students button (see "Join
+links"). Class and subject come from the group, so nothing asks for them again. Make a test offers
+upload or describe it to AI. The app has no page of questions: a wrong answer is fixed from the
+test's own page, which marks everyone's attempt again.
 
 A test's page leads with how it went and who has written it, then the questions (folded to two
 with a link to show the rest) and its settings (time limit, opens, closes, order). Settings (the avatar on Home) holds
@@ -157,14 +159,29 @@ tuition's ids.
 - **Tutors sign up** from the login screen (`POST /auth/signup-tutor`, capped per phone and per hour),
   then create their tuition with the classes and subjects they teach (`POST /auth/tuitions`). The
   first run in the app does both. A tutor can run up to three tuitions.
-- **Students join with a code.** A tuition has a six-character join code (no 0, O, 1 or I). A student
-  who already has a login types it in the app (`POST /student/join`), waits as "pending", and the
-  tutor lets them in from Home with the class and subjects they choose (`/teacher/join-requests`).
-  Wrong codes are counted, so a code cannot be guessed. A tutor can still add a student directly,
-  as before, and the owner can close joining or make a new code.
-- **A student's class and subjects are per tuition,** so one tutor regrouping, resetting the PIN of
-  or removing a shared student leaves the student's other tuitions alone. A name belongs to the
-  person: it can be changed only while the student has no other tuition.
+- **Students make their own accounts** from the login screen: a name, a username and a password of
+  8 or more characters (`POST /auth/signup-student`), or Google (see "Google sign-in"). Sign-ups are
+  capped per phone and per hour, as a tutor's are. A new student is in no tuition until a tutor lets
+  them in. Tutors no longer make students' logins: `POST /teacher/students` and a course's
+  `people/new` answer 410 (`students_sign_up`) on every branch but dev, where the seed and the older
+  checks still use them (migration 036).
+- **Students ask to join** with a group's or course's link (see "Join links"), or with the tuition's
+  six-character join code (no 0, O, 1 or I) typed in the app (`POST /student/join`). Either way they
+  wait as "pending" until a tutor lets them in from Home (`/teacher/join-requests`). A link already
+  says which group or course; with the code, the tutor chooses the class and subjects. Wrong codes
+  and links count together, 8 an hour, so neither can be guessed. The owner can close joining, which
+  stops the links too, or make a new code.
+- **The account is the student's own.** Their class and subjects are per tuition, so one tutor
+  regrouping or removing a shared student leaves the student's other tuitions alone. Being turned
+  off, being removed or the tuition being deleted never deletes the account or stops it logging in.
+  A name belongs to the person: it can be changed only while the student has no other tuition. A
+  student changes their own password, or deletes their account, from their profile. No tutor can
+  set a student's password, so no tutor can log in as a student (the old
+  `/teacher/students/:id/reset-pin` is gone; `tools/security-test.ts` checks it stays gone). The
+  app keeps no email, so a student who forgets their password cannot get that account back: they
+  make a new account and ask to join again. One who signs in with Google has no password to forget.
+  A tutor can still read a student their username from the student's page, and a login locked by
+  wrong tries opens by itself after five minutes, or sooner from the developer's app.
 - **Subjects.** Standard subjects (Maths, Science, Physics, Chemistry, Biology, English, Hindi, Tamil,
   Social Science, Computer Science) are shared; a tuition picks the ones it teaches and can add
   subjects of its own. Groups are explicit, so a new tutor has theirs before any student exists.
@@ -174,6 +191,56 @@ tuition's ids.
   tuitions to a first tuition. On a new database that tuition is empty, and migration 032 removes it,
   so every tuition is made by a tutor signing up.
 - **The owner can delete the tuition** (see "Deleting a tuition").
+
+## Join links
+
+Every group and every course has a link that a tutor shares to invite students. Invite students, on
+the group's or course's page, shows it as a QR code to scan with a phone camera, with Copy link,
+Share link, and Share the QR code as a picture: a 1080 × 1350 image with the group's name, the
+tuition and the code to type.
+
+- **The link** is `<JOIN_LINK_BASE>/j/<code>`. `JOIN_LINK_BASE` is set on the function; without it
+  the link uses the API's own address. The code is 10 characters from the join code's letters,
+  shown as `KR7Q4-MPAXZ`, and a student can type it in the app instead.
+- **The link opens a page** in the phone's browser that names the tuition and the group or course,
+  with Open in the app, and Get the app once `APP_DOWNLOAD_URL` is set. Open in the app is an
+  Android intent link to `<app id>://app/join/<code>`, which falls back to `APP_DOWNLOAD_URL` when
+  the app is not on the phone. The app keeps the code through sign-up or login and then offers it:
+  Ask to join. The page has no scripts, is never cached or indexed and gives away no ids.
+  `GET /join/<code>` returns the same summary as JSON.
+- **Asking** (`POST /student/join` with the link's code) puts the student in the tutor's join
+  requests with what they asked for. Let in adds them to the group (its class, with that subject)
+  or to the course. Decline drops the request. Let all in lets everyone in at once and lists anyone
+  it could not, with the reason: turned off in this tuition, or in another class there.
+- **Make a new link** replaces the old one at once, for a link that reached someone it should not
+  have. Closing joining stops the links as well as the join code.
+
+`api/src/routes/links.ts` and `api/src/lib/join-links.ts` hold it; `tools/join-links-test.ts`
+checks it.
+
+## Google sign-in
+
+Students and tutors can sign in with Google instead of a password. The app asks Google for an ID
+token and sends it to `POST /auth/google`. The server checks Google's signature and that the token
+was made for one of its own client ids. It keeps the account's number (`sub`) and the name, and
+never the email address. Someone new is asked whether they are a student or a tutor, and gets a
+username made from their name. Until `GOOGLE_CLIENT_ID` is set, Google sign-in is off: the app
+hides the button and the server answers 403 `google_off`.
+
+To turn it on, in the Google Cloud console (APIs & Services):
+
+1. Set up the OAuth consent screen with the app's name and a support email.
+2. Make an OAuth client of type **Web application**. Its client id is the one the app asks Google
+   for tokens with.
+3. Make an OAuth client of type **Android** for each key the app is signed with: the package name
+   (`com.tuitiontests.app`, or `com.tuitiontests.app.dev` for debug builds and dev copies) and the
+   key's SHA-1 (`keytool -list -v -keystore <keystore>`; the debug key is
+   `~/.android/debug.keystore`, password `android`). Google uses it to know the app asking is
+   yours; the app never names it.
+4. Set `GOOGLE_CLIENT_ID` on the function to the Web client id. Several ids, comma separated, are
+   all accepted; `GET /auth/config` gives the app the first.
+
+Client ids are not secrets. `tools/google-test.ts` checks the token check with no network.
 
 ## AI credit
 
@@ -204,16 +271,20 @@ Amounts are kept in paise (`api/src/lib/credit.ts`, migration 033).
 
 The owner deletes the tuition from Settings, with their password (`POST /teacher/tuition/delete`;
 a wrong password counts as a wrong try, as at login). In one transaction everything of the tuition
-goes, its tests first so their questions can follow, and so do the accounts of its tutors and
-students who are in no other tuition; their old logins stop working. A student who is also in
-another tuition keeps the account, that tuition and the results written there, and someone who had
-only asked to join keeps their account. Payments stay on record with the tuition's name (migration
+goes, its tests first so their questions can follow, and so do the accounts of its tutors who are in
+no other tuition; their old logins stop working. Students keep their accounts, which are their own:
+a student loses this tuition and what they wrote there, keeps any other tuition and its results,
+and can join another. Payments stay on record with the tuition's name (migration
 034 keeps the top-ups and the credit added by hand; migration 035 tidies the ledger the same way
 for any other delete of a tuition, such as a check's clean-up or one run by hand), and the tuition's
 files are removed from storage afterwards. Unused credit is lost; the screen says how much before the owner confirms.
 
-Students and tutors who do not own a tuition cannot delete their own accounts yet.
 `tools/delete-test.ts` checks it against the local stack.
+
+A student deletes their own account from their profile (`POST /auth/delete-account`), with their
+password, or by choosing their Google account again if they sign in with Google. Everything of
+theirs goes with it, in every tuition. Google Play asks apps with accounts to offer this. Tutors who
+do not own a tuition cannot delete their own accounts yet.
 
 ## Groups and subjects
 
@@ -257,9 +328,11 @@ are never held to it.
 
 Correcting a question's right option, or its marks, marks again every test already written
 with it, so a student who chose the right answer gets the mark even when the key was wrong at
-the time. Questions, tests, papers and students can all be deleted. A question leaves the tests
-nobody has written; one in a test students have written stays, so their results stay whole. A
-written test, or a student, goes only after a second warning, and takes those results with it.
+the time. Questions, tests and papers can all be deleted, and students removed from the tuition. A
+question leaves the tests nobody has written; one in a test students have written stays, so their
+results stay whole. A written test goes only after a second warning, and takes those results with
+it. Removing a student takes their results in this tuition with them, and leaves their account,
+which is their own; turning them off instead keeps the results.
 Deleting a paper also deletes the questions saved from it that no test uses.
 
 ## Ready-made questions
@@ -478,8 +551,10 @@ and three things that would have broken on non-English text are fixed (`api/src/
 checked by `npm run test:text`): the repeat detector kept only a to z and 0 to 9, which made every
 Hindi or Tamil question without digits a repeat of the first one and skipped it, the printed
 answer was matched by English labels only, and an option that looked like bare maths was wrapped
-in `$...$` even when it held Hindi or Tamil words. A name typed in Tamil or Hindi gets its username
-from an English spelling of the name, which AI writes.
+in `$...$` even when it held Hindi or Tamil words. Usernames are in English letters: a student types
+their own at sign-up, and one who signs up with Google under a name in Tamil or Hindi letters gets
+one made from "student". (On the dev branch, where a tutor can still make a student's login, AI
+spells such a name in English for the username.)
 
 Measured on 16 verified Class 10 Maths questions (plain text), translated to Hindi and Tamil by
 Gemini, printed as four-page papers and sent through the real pipeline (`tools/out/lang/`, not in
@@ -520,7 +595,7 @@ It takes only a developer login, and reads either the live database or dev. It s
 - each phone an account is signed in on, with its model, Android version and app version, and
   phones shared by more than one account (apps from 1.2.1 report this; an older app's login
   counts as one phone until it updates);
-- the login history, wrong PINs and lockouts;
+- the login history, wrong passwords and lockouts;
 - which app versions the phones run;
 - the database and storage sizes, and an estimate of this month's compute hours, taken from
   when the database woke and its last request (Neon's own usage figures read 0 on the free plan;
@@ -576,7 +651,8 @@ already gave the closing time). At 8 pm India time the teacher gets a summary of
 anything happened.
 
 The app registers the phone after logging in and on every start. The registration belongs to
-that login, so logging out, or a PIN reset, stops the notifications. Android shows a
+that login, so logging out stops the notifications on that phone, and a password change stops them
+on every other phone. Android shows a
 notification only while the app is in the background. One that arrives with the app open makes
 the screens load again instead, so the new test is on the student's home screen at once.
 Publishing an open test
@@ -719,21 +795,23 @@ and the scripts that read it would then point at the live database.
 | `node tools/second-look-test.mjs` | The second look at questions a page read left without their choices (`api/src/lib/second-look.ts`), on the real misread of a photographed book page: which questions are read again (only on a page that is mostly multiple choice; never a question cut by the page edge, an Assertion and Reason question or an unnumbered one), and what is taken from the new read (a whole list of choices that is not another question's, and words only when they hold all of the old). No keys, no database. |
 | `node tools/wholepaper-test.mjs` | The pure parts of reading a paper's pages together (`api/src/lib/wholepaper.ts`): how pages are split into requests, reading a reply that holds several pages, keeping the pages of a reply that was cut off, pages that came back empty or looping, and folding a question's rest on the next page into the question. No keys, no database. |
 | `node tools/passages-test.mjs` | Handing a passage on to the questions at the top of the next page (`api/src/lib/passages.ts`), on the two layouts seen in real papers (a case study whose last question starts the next page, and a passage printed alone at the foot of a page with its graph and questions on the next) and on the layouts that must be left alone: a question of its own that merely comes next, a question that follows on by number but speaks of things the passage never mentions (the next case study's, when its own passage was missed), an Assertion and Reason section or key, a section that numbers afresh, a table question, a section heading. No keys, no database. |
-| `node tools/tenant-test.ts` | 145 checks that tuitions are walled off from each other, and that sign-up, joining, switching, PIN resets, removals, the owner's join code, the rate limits, picture keys and chapters from another tuition, upload sizes and the daily AI cap behave. It makes its own tutors, tuitions and students, and removes them. |
-| `node tools/security-test.ts` | About 870 checks that walk every route the API has (all but deleting a tuition, which `delete-test.ts` covers), found from the app itself: nobody and each role are refused what they should be, a tutor of another tuition can read or change nothing, junk bodies, ids and queries never end in a server error or an unanswered request, the answer key never reaches a student, a new password signs the other phones out, guesses sent all at once are counted one by one, the sign-up and tuition caps hold under a burst, and an oversized body is read away and refused. `--only '<regex>'` fuzzes just the routes whose `METHOD /path` matches. It makes its own data and removes it. Dev only. |
+| `node tools/tenant-test.ts` | 140 checks that tuitions are walled off from each other, and that sign-up, joining, switching, removals, the owner's join code, the rate limits, picture keys and chapters from another tuition, upload sizes and the daily AI cap behave. It makes its own tutors, tuitions and students, and removes them. |
+| `node tools/security-test.ts` | About 930 checks that walk every route the API has (all but deleting a tuition, which `delete-test.ts` covers), found from the app itself: nobody and each role are refused what they should be, a tutor of another tuition can read or change nothing, junk bodies, ids and queries never end in a server error or an unanswered request, the answer key never reaches a student, a new password signs the other phones out, guesses sent all at once are counted one by one, the sign-up and tuition caps hold under a burst, and an oversized body is read away and refused. `--only '<regex>'` fuzzes just the routes whose `METHOD /path` matches. It makes its own data and removes it. Dev only. |
 | `node tools/load-test.ts` | A classroom (40 students unless `--students` says otherwise) logs in, opens the home screen, starts a test, saves answers and submits, all at the same moment, then reads the marks: no server errors, one finished attempt each, each marked on its own answers, the marks open for everyone, and a table of how long each step took (the trip from your PC to the database is in those figures). It makes its own data and removes it. Dev only. |
 | `node tools/levels-test.ts` | 47 checks of classes 1 to 12 and the levels a tuition names itself. |
 | `node tools/votes-test.ts` | 55 checks of when AI answers agree enough to mark a question: how a model's reading counts (one option, several, none, hesitant), models of two families, splits, the writer's answer, a split on a paper AI wrote being final, and whose word decides whether a question needs its figure (gpt-oss in the solver's place decides alone, another model only with a checker of another family; a checker that needs the figure still stops a mark). |
 | `node tools/answers-test.ts` | 58 checks of the answers and second-opinion steps with scripted models (the API runs in the process against the dev database, every AI call is answered by a script, no keys or quota needed): a model down, slow or answering junk, two that split or doubt, a partial answer kept, the writer's own answer, a question left "not checked yet" and asked again, and whether a flagged question needs its figure: the solver decides, a group shares its figure box, the tutor's word stands, and a question held for the tutor is asked again a few minutes on when the solver was refused. |
 | `node tools/credit-test.ts` | 83 checks of AI credit end to end: the free start, the price set aside before AI work and charged only for what finishes, a page charged once for each picture of it, two jobs at once never spending the same rupees, AI stopping when the credit runs out, and adding credit (a tutor's "I have paid", the developer marking it received or declined, or adding it by hand). The API runs in the process against the local stack, every AI call answered by a script. It makes its own data, removes it, and puts the credit settings back. Dev only. |
-| `node tools/delete-test.ts` | 41 checks of deleting a tuition: only its owner, only with the owner's password; every row goes; the right accounts go and their logins stop working, while a student in another tuition and someone who only asked to join keep theirs; the other tuition is untouched; payments stay on record; storage is emptied. In the process, against the local stack. Dev only. |
+| `node tools/delete-test.ts` | 42 checks of deleting a tuition: only its owner, only with the owner's password; every row goes; its tutors' accounts go and their logins stop working, while every student keeps theirs (and a tutor with a place elsewhere keeps theirs too); the other tuition is untouched; payments stay on record; storage is emptied. In the process, against the local stack. Dev only. |
+| `node tools/join-links-test.ts` | 88 checks of students making their own logins and joining with a link: signing up with a password or with Google, a tutor's links and what they show to anyone, asking to join with one, letting students in one at a time or all at once, or declining, a new link stopping the old one, the account staying the student's own (turned off, removed, a new password, deleting it), group names worded as the app words them, and tutors no longer making students' logins outside dev. Google is played by a key made for the run, so it needs no network. The API runs in the process against the dev database. It makes its own data and removes it. Dev only. |
+| `node tools/google-test.ts` | 54 checks of Google sign-in's token check (`api/src/lib/google.ts`) and a join link's code, address and page (`api/src/lib/join-links.ts`), with tokens signed by a key made for the run. No database, no network. |
 | `node tools/replace-test.ts` | Checks that the question maker replaces what its checks could not settle and never touches what the tutor has, what waits for a second opinion, what a call is working on, or an uploaded paper. The new questions come from the real writer, so the API needs its AI keys. Dev only. |
-| `node tools/courses-test.ts` | 114 checks of courses: people from any class or with no class at all, a course's papers, questions and tests kept out of every group, app versions from before courses kept away from them and told to update, the minimum-build gate, and deleting a course while its people stay. Against the local dry-run API (`--base http://127.0.0.1:8787 --log server.log`) it adds a check that the push names the course. It makes its own data and removes it. Dev only. `tools/courses-demo.ts` sets up a small demo of courses on dev (`--clear` removes it). |
+| `node tools/courses-test.ts` | 123 checks of courses: people from any class or with no class at all, a course's papers, questions and tests kept out of every group, app versions from before courses kept away from them and told to update, the minimum-build gate, and deleting a course while its people stay. Against the local dry-run API (`--base http://127.0.0.1:8787 --log server.log`) it adds a check that the push names the course. It makes its own data and removes it. Dev only. `tools/courses-demo.ts` sets up a small demo of courses on dev (`--clear` removes it). |
 | `node tools/bank-test.ts` | 28 checks of the Bank (`GET /teacher/bank`, app 1.8.1): every paper the tutor has posted once, with how often it was used and the latest test to post it again from. The same questions in another order, fewer of them or for another class are other papers; a draft, a test taken down or a test deleted is no longer a use; who the test went to (the group, or students chosen one by one) is in the row. It makes its own questions and tests through the API, needs no database connection, and removes them again. Dev only. |
 | `node tools/v180-extras-test.ts` | 135 checks of what app 1.8.0 adds on the server: the update gate (a test already started can still be finished), a test left open for a week (the list on Home, Close the test, Remind the students, and the tutor's notification), Library files in the tutor's own order and the notice to students, renaming any subject, easy, medium and hard levels on questions and drafts, and storage per tuition for the developer's app. The notifications are only seen against the local dry-run API (`--base http://127.0.0.1:8787 --log server.log`); `--ai` also has the AI write a few questions. It makes its own data and removes it. Dev only. |
 | `node tools/text-test.mjs` | Hindi and Tamil text handling, the test writer's answer matching and suggested usernames. |
 | `node tools/summary-test.ts --log server.log` | 7 checks that the evening summary goes to each tuition's own tutors (after 8 pm India time; local API, dry-run push). |
-| `npm run test:api` | 178 end-to-end checks of the marking rules, when results open (closing time, last student, tutor, and which app versions wait), usernames for students who share a name, groups, the home and group pages, tutors, logins, question papers (including ones uploaded before their details are known, printed answer keys that replace AI answers, questions the bank already has, two answer calls at once and question groups) and the admin app's API, against the deployed dev API or the one on this PC (`-- --base http://127.0.0.1:18787`). It logs in with the seed's sample logins, so it never runs against `main`; the admin checks run only where the logins file has a developer login. It creates its own students, subject, tests and paper, gives its tests only to those students, then removes them all. |
+| `npm run test:api` | 175 end-to-end checks of the marking rules, when results open (closing time, last student, tutor, and which app versions wait), usernames for students who share a name, groups, the home and group pages, tutors, logins, question papers (including ones uploaded before their details are known, printed answer keys that replace AI answers, questions the bank already has, two answer calls at once and question groups) and the admin app's API, against the deployed dev API or the one on this PC (`-- --base http://127.0.0.1:18787`). It logs in with the seed's sample logins, so it never runs against `main`; the admin checks run only where the logins file has a developer login. It creates its own students, subject, tests and paper, gives its tests only to those students, then removes them all. |
 | `node tools/notify-test.ts --log server.log` | 25 checks of the notifications against the API on your PC, run with `PUSH_DRY_RUN=1` so each notification is written to the log instead of sent. Dev only. |
 | `node tools/check-answers.ts` | Every sample question's marked answer is right, and no other option equals it. |
 | `node tools/ai-test.ts` | How accurately the AI reads the 2-page sample paper (render it first with `tools/make-sample-paper.ps1`). |
@@ -741,6 +819,10 @@ and the scripts that read it would then point at the live database.
 | `SHOTS=1 flutter test test/shots/screens_test.dart` (in `app/` or `admin/`) | Draws the screens, light and dark, to `tools/out/shots` on your PC from a stub server: the real widgets and fonts, no phone. `LANDSCAPE=1` in `app/` draws them on their side, and `WIDTH_DP=360 TEXTSCALE=1.5` draws them on a narrow phone with large text, which is how to find what stops fitting. |
 | `flutter test test/contract/tenant_flow_test.dart --dart-define=API_BASE=http://127.0.0.1:8787` (in `app/`) | The app's session code against the local API: sign up, make a tuition, join a second one, be let in, switch. Then `node tools/out/cleanup-contract.mjs`. |
 | `python tools/audit.py` | The design audit: type scale only, no stray colours, no banned patterns, and where the accent is used. |
+
+On a fresh database, run `node tools/test-accounts.ts --base http://127.0.0.1:18787` once before
+`library-test.ts`, `plan-test.ts` and `v180-extras-test.ts`: it makes the test logins they log in
+with, and writes their passwords to `tools/out` without printing them.
 
 ## Design
 
@@ -766,11 +848,13 @@ live only in those files and on the deployed function, never in the app.
 
 Anyone can sign up as a tutor, so each door has a ceiling:
 
-- **Sign-ups:** 30 new tutors an hour for the whole service, 3 a day from one phone, and 3 tuitions a tutor.
+- **Sign-ups:** 30 new tutors and 300 new students an hour for the whole service, 3 accounts a day from one
+  phone, and 3 tuitions a tutor.
 - **Logins:** 5 wrong tries lock a login for 5 minutes. Each try is counted before it is judged, so a burst of
   guesses sent at once is counted one by one; a tutor changing their password counts the same way. A login that
-  does not exist takes as long to refuse as one that does, and a turned-off login says so only to someone who knows its PIN.
-  A student asking to join with a code gets 8 wrong codes an hour.
+  does not exist takes as long to refuse as one that does, and a turned-off login says so only to someone who knows its password.
+  A student asking to join with a code or a link gets 8 wrong ones an hour. A link's code is 10 random characters
+  (about 50 bits), so one group's link cannot be worked out from another's.
 - **AI:** a tuition may start 100 papers and make 500 AI calls (failed ones too) in a day; `AI_DAILY_CALLS`
   on the function changes the second. Past it the app says the tuition has used its day of AI.
 - **Pictures:** a picture goes straight to storage. An app from 1.5.0 says how big each picture is and its upload
@@ -805,6 +889,13 @@ prompt. Note the address of the API function on `main`: every release build need
 
 Then upload the AI keys with `tools/upload-groq-keys.ps1 -Branch main`, and set the UPI id and
 name tutors pay to in the admin app (Settings → AI credit).
+
+Set these on the function too, or leave them out:
+
+- `GOOGLE_CLIENT_ID`: Google sign-in is off without it (see "Google sign-in").
+- `JOIN_LINK_BASE`: the address join links start with, if it is not the API's own (see "Join links").
+- `APP_DOWNLOAD_URL`: an `https://` page to get the app from, which a join link's page offers to a
+  phone that does not have the app yet.
 
 To reset a tutor's forgotten password, run this in a terminal and type the new password at the
 hidden prompt:

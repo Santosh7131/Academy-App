@@ -11,6 +11,7 @@ import 'credit_screens.dart';
 import 'delete_tuition_screen.dart';
 import 'group_screens.dart';
 import 'home_screen.dart';
+import 'invite_screen.dart';
 import 'join_requests_screen.dart';
 import 'make_test.dart' show MakeTests;
 import 'make_tests_screen.dart';
@@ -78,7 +79,13 @@ final teacherRoutes = <RouteBase>[
       subjectName: s.uri.queryParameters['name'] ?? '',
     ),
   ),
-  _page('/t/students/new', (s) => AddStudentScreen(classLevel: _int(s, 'class'), subjectId: s.uri.queryParameters['subject'])),
+  // A group's link (class, subject, and the subject's name) or a course's (course, and its name), with its QR code.
+  _page('/t/invite', (s) => InviteScreen(
+        classLevel: _int(s, 'class'),
+        subjectId: s.uri.queryParameters['subject'],
+        courseId: s.uri.queryParameters['course'],
+        name: s.uri.queryParameters['name'] ?? '',
+      )),
   // From a course's page the person is shown as that course sees them: only its tests.
   _page('/t/students/:id', (s) => StudentDetailScreen(id: s.pathParameters['id']!, courseId: s.uri.queryParameters['course'], courseName: s.uri.queryParameters['name'])),
   _page(

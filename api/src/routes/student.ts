@@ -1,12 +1,12 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { requireUser, tuitionOf, type AppEnv } from '../lib/auth.ts';
 import { ASSIGNED, isWriting, resultPayload, saveAnswers, startOrResume, submitAttempt } from '../lib/attempts.ts';
 import { knowsMoreOptions, updateRequired } from '../lib/client.ts';
-import { pool, q, q1, tq, tq1 } from '../lib/db.ts';
+import { pool, q, q1, tq, tq1, tx } from '../lib/db.ts';
 import { HttpError, notFound, uuid } from '../lib/http.ts';
+import { linkByCode, readJoin, targetLabel } from '../lib/join-links.ts';
 import { LEVELS_JSON } from '../lib/levels.ts';
 import { studentFileCount } from '../lib/library.ts';
-import { readCode } from '../lib/tuition.ts';
 import { readBody } from './body.ts';
 import { studentLibrary } from './library.ts';
 
@@ -30,15 +30,17 @@ studentOpenRoutes.get('/tuitions', requireUser('student', { tuition: 'none' }), 
 const MAX_WRONG_CODES = 8;
 
 /**
- * Asks to join a tuition with its code. The student waits (status pending) until a tutor lets them
- * in, so a code that gets passed around cannot put strangers into a tuition. Wrong codes are
- * counted, so a code cannot be guessed.
+ * Asks to join, with a tuition's code or a group's or course's link (its code, or the whole link pasted). The student waits
+ * (status pending) until a tutor lets them in, so a code that gets passed around cannot put strangers into a tuition. Wrong
+ * codes are counted, so a code cannot be guessed.
  */
 studentOpenRoutes.post('/join', requireUser('student', { tuition: 'none' }), async (c) => {
   const me = c.get('user');
-  const code = readCode((await readBody(c)).code);
+  const asked = readJoin((await readBody(c)).code);
   const wrong = await q1(`select count(*) as n from join_attempts where user_id = $1 and not ok and at > now() - interval '1 hour'`, [me.id]);
   if (wrong.n >= MAX_WRONG_CODES) throw new HttpError(429, 'too_many_tries', 'Too many wrong codes. Please try again in an hour.');
+  if (asked.kind === 'link') return askWithLink(c, me.id, asked.code);
+  const code = asked.code;
   const t = await q1<{ id: string; name: string; join_open: boolean }>('select id, name, join_open from tuitions where join_code = $1', [code]);
   if (!t) {
     await pool.query('insert into join_attempts (user_id, ok) values ($1, false)', [me.id]);
@@ -56,6 +58,50 @@ studentOpenRoutes.post('/join', requireUser('student', { tuition: 'none' }), asy
   await pool.query('insert into join_attempts (user_id, ok) values ($1, true)', [me.id]);
   return c.json({ tuition: { id: t.id, name: t.name }, status: 'pending' }, 201);
 });
+
+/**
+ * Asks to join a group or course with its link. A student new to the tuition waits for it as a whole (status pending) as well;
+ * one already in it asks for the group or course alone, and keeps using the app meanwhile. Asking again changes nothing.
+ * `status` is the student's place in the tuition, `asked` what the link is for.
+ */
+async function askWithLink(c: Context<AppEnv>, studentId: string, code: string) {
+  const link = await linkByCode(code);
+  if (!link) {
+    await pool.query('insert into join_attempts (user_id, ok) values ($1, false)', [studentId]);
+    throw new HttpError(404, 'unknown_link', 'This link has stopped working. Ask your tutor for the new one.');
+  }
+  const label = targetLabel(link);
+  const have = await q1<{ status: string; class_level: number | null }>(
+    'select status, class_level from memberships where tuition_id = $1 and user_id = $2',
+    [link.tuition_id, studentId],
+  );
+  if (have?.status === 'off') throw new HttpError(403, 'turned_off', `${link.tuition_name} has turned off your place. Please ask your tutor.`);
+  if (have?.status === 'active') {
+    const inIt = link.course_id
+      ? await q1('select 1 as x from course_members where course_id = $1 and student_id = $2', [link.course_id, studentId])
+      : have.class_level === link.class_level &&
+        (await q1('select 1 as x from student_subjects where tuition_id = $1 and student_id = $2 and subject_id = $3', [link.tuition_id, studentId, link.subject_id]));
+    if (inIt) throw new HttpError(409, 'already_member', `You are already in ${label}.`);
+  } else if (!link.join_open) {
+    throw new HttpError(403, 'not_joinable', `${link.tuition_name} is not taking new students right now.`);
+  }
+  const made = await tx(async (cx) => {
+    if (!have) {
+      await cx.query(`insert into memberships (tuition_id, user_id, role, status) values ($1, $2, 'student', 'pending') on conflict do nothing`, [link.tuition_id, studentId]);
+    }
+    const r = await q1(
+      'insert into join_requests (tuition_id, student_id, group_id, course_id) values ($1, $2, $3, $4) on conflict do nothing returning id',
+      [link.tuition_id, studentId, link.group_id, link.course_id],
+      cx,
+    );
+    await cx.query('insert into join_attempts (user_id, ok) values ($1, true)', [studentId]);
+    return !!r;
+  });
+  return c.json(
+    { tuition: { id: link.tuition_id, name: link.tuition_name }, status: have?.status ?? 'pending', asked: { kind: link.course_id ? 'course' : 'group', label } },
+    made ? 201 : 200,
+  );
+}
 
 export const studentRoutes = new Hono<AppEnv>();
 studentRoutes.use('*', requireUser('student'));

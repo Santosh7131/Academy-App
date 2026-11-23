@@ -28,19 +28,27 @@ GoRouter buildRouter() => GoRouter(
       refreshListenable: session,
       redirect: (context, state) {
         final loc = state.matchedLocation;
+        // A group's or course's join link opened the app (<app id>://app/join/<code>, from the link's page or its QR code): its
+        // code is kept first, before anything below sends the app elsewhere, and the join screen offers it once it can.
+        if (loc.startsWith('/join/')) session.holdJoin(loc.substring('/join/'.length));
         if (!session.restored || !session.splashDone) return loc == '/start' ? null : '/start';
         // A version the server no longer accepts shows the update screen, signed in or not.
         if (session.updateRequired) return loc == '/update' ? null : '/update';
         if (loc == '/update') return session.signedIn ? (session.isTeacher ? '/t' : '/s') : '/login';
-        if (!session.signedIn) return loc == '/login' || loc == '/signup' ? null : '/login';
+        const signedOut = {'/login', '/signup', '/signup/student'};
+        if (!session.signedIn) return signedOut.contains(loc) ? null : '/login';
         final teacher = session.isTeacher;
         final home = teacher ? '/t' : '/s';
+        // Join links are for students: a tutor's phone forgets one.
+        if (teacher && session.pendingJoin != null) session.dropJoin();
         // A tutor with no tuition creates one first; a student with no place yet can only ask to join.
         if (session.needsTuition) {
           if (teacher) return loc == '/setup' ? null : '/setup';
           return loc == '/s/join' || loc == '/s/profile' ? null : '/s/join';
         }
-        if (loc == '/start' || loc == '/login' || loc == '/signup' || loc == '/setup') return home;
+        // A student who opened a join link sees it as soon as they are in.
+        if (!teacher && session.pendingJoin != null && (loc == '/start' || loc.startsWith('/join/') || signedOut.contains(loc))) return '/s/join';
+        if (loc == '/start' || loc.startsWith('/join/') || signedOut.contains(loc) || loc == '/setup') return home;
         if (teacher && loc.startsWith('/s')) return home;
         if (!teacher && loc.startsWith('/t')) return home;
         return null;
@@ -49,6 +57,9 @@ GoRouter buildRouter() => GoRouter(
         page('/start', (_) => const StartScreen()),
         page('/login', (_) => const LoginScreen()),
         page('/signup', (_) => const TutorSignUpScreen()),
+        page('/signup/student', (_) => const StudentSignUpScreen()),
+        // Never shown: the redirect above keeps the link's code and moves on.
+        page('/join/:code', (_) => const SizedBox.shrink()),
         page('/setup', (_) => const SetupScreen()),
         page('/update', (_) => const UpdateRequiredScreen()),
         page('/s', (_) => const StudentHome()),

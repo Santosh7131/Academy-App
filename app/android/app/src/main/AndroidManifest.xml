@@ -31,6 +31,16 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- A group's or course's join link opens the app at <app id>://app/join/<code>: the link's web page and its QR code
+                 lead here (api/src/lib/join-links.ts). The scheme is the app's own id, so the test build (".dev") opens only from
+                 the test server's pages. The router keeps the code for the join screen (lib/router.dart). -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="true" />
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="${applicationId}" android:host="app" android:pathPrefix="/join/"/>
+            </intent-filter>
         </activity>
         <!-- Push notifications: the "tests" channel (MainActivity creates it) and the status-bar icon. -->
         <meta-data

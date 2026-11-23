@@ -1,11 +1,12 @@
-// Imports the ready-made question library (tools/library) into a branch: each book's subject and
+// The older import of the ready-made questions (api/src/ready-made), kept from the original app: the app now adds a book to a
+// tuition itself (routes/ready-made.ts). This one fills only the first tuition (made by migration 012) with each book's subject and
 // chapters, its questions (source 'library'), and one draft chapter test per chapter that goes to
 // the class's group for that subject. Safe to run again: rows are matched by library_key, and a
 // chapter test the teacher has already published or edited is left alone.
 // Usage: node tools/seed-library.ts [--env .env.local] [--class 10] [--subject Maths] [--allow-main]
 import { createHash } from 'node:crypto';
 import pg from 'pg';
-import { arrange, books } from './library/index.ts';
+import { arrange, books } from '../api/src/ready-made/index.ts';
 
 const args = process.argv.slice(2);
 const arg = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);

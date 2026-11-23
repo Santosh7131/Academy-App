@@ -4,11 +4,13 @@ import 'package:go_router/go_router.dart';
 import '../student/profile_screen.dart';
 import '../student/result_screen.dart';
 import '../student/review_screen.dart';
+import 'attendance_screens.dart';
 import 'bank_screen.dart';
 import 'classes_screen.dart';
 import 'course_screens.dart';
 import 'credit_screens.dart';
 import 'delete_tuition_screen.dart';
+import 'fees_screens.dart';
 import 'group_screens.dart';
 import 'home_screen.dart';
 import 'invite_screen.dart';
@@ -16,12 +18,16 @@ import 'join_requests_screen.dart';
 import 'make_test.dart' show MakeTests;
 import 'make_tests_screen.dart';
 import 'papers_screens.dart';
+import 'parent_report.dart';
+import 'plan_screens.dart';
+import 'print_test.dart';
 import 'questions_screens.dart';
 import 'settings_screen.dart';
 import 'share_code_screen.dart';
 import 'shell.dart';
 import 'students_screens.dart';
 import 'tests_screens.dart';
+import 'timetable_screens.dart';
 
 /// A tab's own screen. Switching tabs swaps instantly, as a tab bar should.
 GoRoute _tab(String path, Widget Function(GoRouterState s) build) =>
@@ -32,6 +38,12 @@ GoRoute _page(String path, Widget Function(GoRouterState s) build) =>
     GoRoute(path: path, pageBuilder: (c, s) => MaterialPage(key: s.pageKey, child: build(s)));
 
 int? _int(GoRouterState s, String key) => int.tryParse(s.uri.queryParameters[key] ?? '');
+
+/// A register's class from its link: a course's (course) or a group's (class and subject).
+ClassRef _classRef(GoRouterState s) {
+  final course = s.uri.queryParameters['course'];
+  return course != null ? ClassRef.course(course) : ClassRef.group(_int(s, 'class') ?? 0, s.uri.queryParameters['subject'] ?? '');
+}
 
 /// Three tabs inside the shell, Home, Groups & courses and the Bank; everything else is pushed full-screen above it.
 /// Students, tests, uploads and test questions all live inside a group or a course. The Groups and Courses tabs of
@@ -79,6 +91,18 @@ final teacherRoutes = <RouteBase>[
       subjectName: s.uri.queryParameters['name'] ?? '',
     ),
   ),
+  // A class's register for a day (today when none is named), and its month: a group's (class, subject) or a course's.
+  _page('/t/attendance/month', (s) => AttendanceMonthScreen(ref: _classRef(s), name: s.uri.queryParameters['name'] ?? '', month: s.uri.queryParameters['month'])),
+  // Fees, for the owner (fees_screens.dart). Who a fee is for, a payment to record and a receipt come with the route.
+  _page('/t/fees', (s) => FeesScreen(month: s.uri.queryParameters['month'])),
+  _page('/t/fees/upi', (_) => const UpiIdScreen()),
+  _page('/t/fees/set', (s) => s.extra is FeeTarget ? SetFeeScreen(target: s.extra! as FeeTarget) : const FeesScreen()),
+  _page('/t/fees/students/:id', (s) => FeeStudentScreen(id: s.pathParameters['id']!, name: s.uri.queryParameters['name'])),
+  _page('/t/fees/record', (s) => s.extra is Map ? RecordPaymentScreen(data: Map<String, dynamic>.from(s.extra! as Map)) : const FeesScreen()),
+  _page('/t/fees/receipt', (s) => s.extra is Map ? ReceiptScreen(payment: Map<String, dynamic>.from(s.extra! as Map)) : const FeesScreen()),
+  _page('/t/attendance', (s) => AttendanceScreen(ref: _classRef(s), name: s.uri.queryParameters['name'] ?? '', day: s.uri.queryParameters['day'])),
+  // A class's timetable (timetable_screens.dart): a group's (class, subject) or a course's, with the class's name.
+  _page('/t/timetable', (s) => TimetableScreen(ref: _classRef(s), name: s.uri.queryParameters['name'] ?? '')),
   // A group's link (class, subject, and the subject's name) or a course's (course, and its name), with its QR code.
   _page('/t/invite', (s) => InviteScreen(
         classLevel: _int(s, 'class'),
@@ -88,6 +112,7 @@ final teacherRoutes = <RouteBase>[
       )),
   // From a course's page the person is shown as that course sees them: only its tests.
   _page('/t/students/:id', (s) => StudentDetailScreen(id: s.pathParameters['id']!, courseId: s.uri.queryParameters['course'], courseName: s.uri.queryParameters['name'])),
+  _page('/t/students/:id/report', (s) => ParentReportScreen(id: s.pathParameters['id']!, courseId: s.uri.queryParameters['course'], courseName: s.uri.queryParameters['name'])),
   _page(
     '/t/papers/new',
     (s) => UploadPaperScreen(
@@ -100,18 +125,30 @@ final teacherRoutes = <RouteBase>[
   _page('/t/papers/:id', (s) => PaperReviewScreen(id: s.pathParameters['id']!, autoRead: s.uri.queryParameters['read'] == '1')),
   // A question opens only from a test or a paper, to fix its answer.
   _page('/t/questions/:id', (s) => QuestionEditor(id: s.pathParameters['id']!)),
-  _page('/t/tests/new', (_) => const TestEditor()),
+  _page(
+    '/t/tests/new',
+    (s) => TestEditor(
+      classLevel: _int(s, 'class'),
+      subjectId: s.uri.queryParameters['subject'],
+      courseId: s.uri.queryParameters['course'],
+      courseName: s.uri.queryParameters['name'],
+    ),
+  ),
   _page('/t/tests/:id/edit', (s) => TestEditor(id: s.pathParameters['id']!)),
+  _page('/t/tests/:id/print', (s) => PrintTestScreen(id: s.pathParameters['id']!)),
   _page('/t/tests/:id', (s) => TestResultsScreen(id: s.pathParameters['id']!)),
   _page('/t/attempts/:id/review', (s) => ReviewScreen(attemptId: s.pathParameters['id']!, start: int.tryParse(s.uri.queryParameters['n'] ?? '') ?? 1, teacher: true)),
   _page('/t/attempts/:id', (s) => ResultScreen(attemptId: s.pathParameters['id']!, teacher: true)),
   _page('/t/settings', (_) => const SettingsScreen()),
   _page('/t/settings/delete', (_) => const DeleteTuitionScreen()),
-  // AI credit: the balance, every line, adding credit, and the request once sent.
+  // AI credit: the balance and every line. AI comes with the plans, so the old way to add credit opens them.
   _page('/t/credit', (_) => const CreditScreen()),
   _page('/t/credit/history', (_) => const CreditHistoryScreen()),
-  _page('/t/credit/add', (_) => const AddCreditScreen()),
-  _page('/t/credit/sent', (s) => CreditSentScreen(request: (s.extra as Map<String, dynamic>?) ?? const {})),
+  _page('/t/credit/add', (_) => const PlanScreen()),
+  // Plans: the plan and its room, buying one, and the payment once sent.
+  _page('/t/plan', (_) => const PlanScreen()),
+  _page('/t/plan/buy', (s) => BuyPlanScreen(plan: s.uri.queryParameters['plan'] ?? 'basic')),
+  _page('/t/plan/sent', (s) => PlanSentScreen(request: (s.extra as Map<String, dynamic>?) ?? const {})),
   _page('/t/code', (s) => ShareCodeScreen(first: s.uri.queryParameters['first'] == '1')),
   _page('/t/requests', (_) => const JoinRequestsScreen()),
   _page('/t/profile', (_) => const ProfileScreen()),

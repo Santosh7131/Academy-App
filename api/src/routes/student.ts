@@ -9,6 +9,9 @@ import { LEVELS_JSON } from '../lib/levels.ts';
 import { studentFileCount } from '../lib/library.ts';
 import { readBody } from './body.ts';
 import { studentLibrary } from './library.ts';
+import { attendanceThisMonth } from './attendance.ts';
+import { feeForStudentHome } from './fees.ts';
+import { classesForStudent } from '../lib/timetable.ts';
 
 // A student's tuitions, and asking to join one. These need no active tuition, so a student who is
 // still waiting to be let in can open them. Mounted before studentRoutes, whose middleware refuses
@@ -185,9 +188,15 @@ studentRoutes.get('/home', async (c) => {
   );
   const now = await q1('select now()');
   // `library` is how many files the student can read: the Library tab shows only when there are some.
+  // `attendance` is this month's, every class's registers together; Home shows it once a register has been taken.
   return c.json({
     server_now: now.now, tuition: { id: t.id, name: t.name }, tests: present(rows), courses: Number(courses?.n ?? 0),
     library: await studentFileCount(t.id, me.id, me.class_level),
+    attendance: await attendanceThisMonth(t.id, me.id),
+    // What is owed, once the tutor has set a fee (routes/fees.ts).
+    fee: await feeForStudentHome(t.id, me.id),
+    // Today's classes, or the next one, from the timetable (lib/timetable.ts), with their links to join online.
+    classes: await classesForStudent(t.id, me.id),
   });
 });
 

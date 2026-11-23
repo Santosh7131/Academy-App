@@ -48,6 +48,9 @@ class TestTarget {
 
   String get chatPath => isCourse ? '/t/courses/$courseId/chat?name=${_enc(plainName)}' : '/t/groups/$classLevel/$subjectId/chat?name=${_enc(plainName)}';
 
+  /// A new test of this class made from questions the tuition has, ready-made ones among them (the test editor).
+  String get newTestPath => isCourse ? '/t/tests/new?course=$courseId&name=${_enc(plainName)}' : '/t/tests/new?class=$classLevel&subject=$subjectId';
+
   static int _int(Object? v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
 }
 

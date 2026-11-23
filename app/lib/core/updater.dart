@@ -6,6 +6,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
+import 'device.dart';
+
 /// Where the app looks for a newer version of itself: a small JSON file attached to every GitHub release (tools/release-app.ps1
 /// writes it and passes this address with --dart-define=UPDATE_FEED=...). A build without it, such as every debug build, never
 /// looks for updates, so a test build never offers to replace itself with the live app.
@@ -71,9 +73,19 @@ class Updater extends ChangeNotifier {
   bool _resumeAfterAllow = false;
 
   /// Whether this build looks for updates at all (release builds, or a test build given a feed).
-  bool get enabled => updateFeed.isNotEmpty && Platform.isAndroid;
+  /// The web build never: a browser loads the newest app from its host.
+  bool get enabled => !kIsWeb && updateFeed.isNotEmpty && Platform.isAndroid;
 
   Future<void> start() async {
+    if (kIsWeb) {
+      // A browser has no installer to ask: its version is the one version.json named (core/device.dart).
+      final m = RegExp(r'^tuition_app/([^+]+)').firstMatch(Device.headers['x-app'] ?? '');
+      if (m != null && version == null) {
+        version = m.group(1);
+        notifyListeners();
+      }
+      return;
+    }
     if (_started || !Platform.isAndroid) return;
     _started = true;
     _native.setMethodCallHandler(_fromAndroid);

@@ -5,10 +5,13 @@ import '../../core/api.dart';
 import '../../core/changes.dart';
 import '../../core/credit.dart';
 import '../../core/format.dart' as f;
+import '../../core/timetable.dart';
 import '../../core/library.dart';
 import '../../theme.dart';
 import '../../ui/kit.dart';
 import 'common.dart';
+import 'attendance_screens.dart';
+import 'timetable_screens.dart';
 import 'credit_screens.dart' show CreditPill, PricedAction;
 import 'library_tab.dart';
 import 'make_test.dart';
@@ -195,6 +198,19 @@ class _GroupScreenState extends State<GroupScreen> with WidgetsBindingObserver, 
     return [
       const SizedBox(height: 18),
       PrimaryButton('Make tests', leadingIcon: Ph.plus, onTap: _makeTest),
+      // A server from before attendance sends no attendance_today, and the button stays away.
+      if (d.containsKey('attendance_today')) ...[
+        const SizedBox(height: 10),
+        AttendanceButton(
+          today: (d['attendance_today'] as Map?)?.cast<String, dynamic>(),
+          onTap: () => _go(ClassRef.group(widget.classLevel, widget.subjectId).link(_name)),
+        ),
+      ],
+      // The group's timetable; a server from before it sends no times, and the button stays away.
+      if (d.containsKey('times')) ...[
+        const SizedBox(height: 10),
+        TimetableButton(times: ClassTime.list(d['times']), onTap: () => _go(timetableLink(ClassRef.group(widget.classLevel, widget.subjectId), _name))),
+      ],
       const SizedBox(height: 18),
       SegmentedToggle(
         labels: const ['Tests', 'Library', 'Students'],

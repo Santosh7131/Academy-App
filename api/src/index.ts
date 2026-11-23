@@ -13,6 +13,12 @@ import { adminRoutes } from './routes/admin.ts';
 import { authRoutes } from './routes/auth.ts';
 import { courseRoutes } from './routes/courses.ts';
 import { creditAdminRoutes, creditRoutes } from './routes/credit.ts';
+import { planAdminRoutes, planRoutes } from './routes/plans.ts';
+import { solutionRoutes } from './routes/solutions.ts';
+import { attendanceRoutes } from './routes/attendance.ts';
+import { feeRoutes, studentFeeRoutes } from './routes/fees.ts';
+import { timetableRoutes } from './routes/timetable.ts';
+import { readyMadeRoutes } from './routes/ready-made.ts';
 import { libraryRoutes } from './routes/library.ts';
 import { joinPublicRoutes, linkRoutes } from './routes/links.ts';
 import { notifyRoutes } from './routes/notify.ts';
@@ -55,8 +61,8 @@ app.use('*', async (c, next) => {
   return next();
 });
 
-// The Android apps need no CORS. A browser build is let in only from the origins named in CORS_ORIGINS
-// (comma separated), which the live function never sets: no website can call it from a page.
+// The Android apps need no CORS. The web version (README "The web version") is let in only from the origins named in
+// CORS_ORIGINS (comma separated): unset, no page anywhere can call the API.
 const origins = (process.env.CORS_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean);
 if (origins.length) {
   app.use('*', cors({
@@ -97,6 +103,7 @@ app.get('/', (c) =>
 app.route('/auth', authRoutes);
 app.route('/student', studentOpenRoutes);
 app.route('/student', studentRoutes);
+app.route('/student', studentFeeRoutes);
 app.route('/', notifyRoutes);
 // A group's or course's join link: what it is for (GET /join/:code), and the page it opens in a browser (GET /j/:code).
 app.route('/', joinPublicRoutes);
@@ -110,12 +117,19 @@ teacher.route('/', linkRoutes);
 teacher.route('/', libraryRoutes);
 teacher.route('/', paperRoutes);
 teacher.route('/', creditRoutes);
+teacher.route('/', planRoutes);
+teacher.route('/', solutionRoutes);
+teacher.route('/', attendanceRoutes);
+teacher.route('/', feeRoutes);
+teacher.route('/', timetableRoutes);
+teacher.route('/', readyMadeRoutes);
 app.route('/teacher', teacher);
 
 const admin = new Hono<AppEnv>();
 admin.use('*', requireUser('developer'));
 admin.route('/', adminRoutes);
 admin.route('/', creditAdminRoutes);
+admin.route('/', planAdminRoutes);
 app.route('/admin', admin);
 
 app.notFound((c) => c.json({ error: { code: 'not_found', message: 'Not found.' } }, 404));

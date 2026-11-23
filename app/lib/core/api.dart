@@ -134,8 +134,26 @@ class Api {
       if (res.statusCode >= 300) throw ApiException(res.statusCode, 'upload_failed', 'The upload did not go through. Try again.');
     } on SocketException {
       throw ApiException(0, 'offline', 'No internet connection. Check your connection and try again.');
+    } on http.ClientException {
+      // What a browser's request throws when it cannot connect.
+      throw ApiException(0, 'offline', 'No internet connection. Check your connection and try again.');
     } on TimeoutException {
       throw ApiException(0, 'offline', 'The upload is taking too long. Check your internet and try again.');
+    }
+  }
+
+  /// Downloads a file from object storage with a presigned URL (a question's figure, to print it).
+  Future<List<int>> getBytes(String url) async {
+    try {
+      final res = await _client.get(Uri.parse(url)).timeout(const Duration(seconds: 60));
+      if (res.statusCode >= 300) throw ApiException(res.statusCode, 'download_failed', 'A picture did not download. Try again.');
+      return res.bodyBytes;
+    } on SocketException {
+      throw ApiException(0, 'offline', 'No internet connection. Check your connection and try again.');
+    } on http.ClientException {
+      throw ApiException(0, 'offline', 'No internet connection. Check your connection and try again.');
+    } on TimeoutException {
+      throw ApiException(0, 'offline', 'The download is taking too long. Check your internet and try again.');
     }
   }
 }

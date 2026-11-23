@@ -16,6 +16,7 @@ import path from 'node:path';
 
 const PG = { name: 'startup-test-pg', image: 'postgres:17', port: 55432 };
 const S3 = { name: 'startup-test-s3', image: 'chrislusf/seaweedfs:4.54', port: 59000 };
+const S3_VOLUMES = ['-master.volumeSizeLimitMB=64', '-volume.max=32'];
 const ENV_FILE = '.env.local';
 const S3_CONFIG = path.resolve('tools/out/local-stack/s3.json');
 const MARK = '# written by tools/local-stack.mjs';
@@ -46,9 +47,12 @@ async function up() {
       credentials: [{ accessKey: 'startup', secretKey: s3Pass }], actions: ['Admin', 'Read', 'List', 'Tagging', 'Write'] }] }));
     docker('run', '-d', '--name', PG.name, '-p', `127.0.0.1:${PG.port}:5432`, '-e', `POSTGRES_PASSWORD=${pgPass}`,
       '-e', 'POSTGRES_DB=startup', '--tmpfs', '/var/lib/postgresql/data:rw', PG.image);
+    // Small volumes, and room for many: SeaweedFS sizes volumes at 30 GB by default, so on the memory disk (about 4 GB)
+    // it could make only 3, all taken by the uploads bucket. Its own log then had none to write to, and after some hours
+    // of failing to, every upload hung (24 November).
     docker('run', '-d', '--name', S3.name, '-p', `127.0.0.1:${S3.port}:8333`,
       '--mount', `type=bind,source=${S3_CONFIG},target=/etc/s3.json,readonly`, '--tmpfs', '/data:rw',
-      S3.image, 'server', '-s3', '-s3.config=/etc/s3.json', '-dir=/data');
+      S3.image, 'server', '-s3', '-s3.config=/etc/s3.json', '-dir=/data', ...S3_VOLUMES);
   }
   for (let i = 0; ; i++) {
     try { docker('exec', PG.name, 'pg_isready', '-U', 'postgres', '-d', 'startup'); break; } catch {}

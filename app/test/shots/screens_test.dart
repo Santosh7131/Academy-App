@@ -9,10 +9,11 @@ import 'dart:ui' as ui;
 
 import 'package:tuition_app/core/api.dart';
 import 'package:tuition_app/core/credit.dart';
-import 'package:tuition_app/core/format.dart' show dayTitle, time;
+import 'package:tuition_app/core/format.dart' show dayKey, dayTitle, time;
 import 'package:tuition_app/core/google.dart';
 import 'package:tuition_app/core/library.dart' show LibFile, LibraryEnv, UploadJob, UploadState;
 import 'package:tuition_app/core/session.dart';
+import 'package:tuition_app/core/timetable.dart' show ClassTime;
 import 'package:tuition_app/core/updater.dart';
 import 'package:tuition_app/features/auth/login_screen.dart';
 import 'package:tuition_app/features/auth/start_screen.dart';
@@ -31,6 +32,8 @@ import 'package:tuition_app/features/teacher/bank_screen.dart';
 import 'package:tuition_app/features/teacher/classes_screen.dart';
 import 'package:tuition_app/features/teacher/course_screens.dart';
 import 'package:tuition_app/features/teacher/credit_screens.dart';
+import 'package:tuition_app/features/teacher/plan_screens.dart';
+import 'package:tuition_app/features/teacher/attendance_screens.dart' show AttendanceMonthScreen, AttendanceScreen, ClassRef;
 import 'package:tuition_app/features/teacher/group_screens.dart' show ChatTestScreen, GroupScreen;
 import 'package:tuition_app/features/teacher/home_screen.dart';
 import 'package:tuition_app/features/teacher/invite_screen.dart';
@@ -41,13 +44,21 @@ import 'package:tuition_app/features/teacher/page_pictures.dart' show FigureCutS
 import 'package:tuition_app/features/teacher/papers_screens.dart';
 import 'package:tuition_app/features/teacher/settings_screen.dart';
 import 'package:tuition_app/features/teacher/delete_tuition_screen.dart';
+import 'package:tuition_app/features/teacher/fees_screens.dart';
+import 'package:tuition_app/features/student/fees_screen.dart' show MyFeesScreen;
 import 'package:tuition_app/features/teacher/teacher_routes.dart';
 import 'package:tuition_app/features/teacher/setup_screen.dart';
+import 'package:tuition_app/features/teacher/parent_report.dart';
+import 'package:tuition_app/features/teacher/print_test.dart';
+import 'package:tuition_app/features/teacher/questions_screens.dart' show QuestionEditor;
 import 'package:tuition_app/features/teacher/students_screens.dart';
 import 'package:tuition_app/features/teacher/share_code_screen.dart';
 import 'package:tuition_app/features/teacher/tests_screens.dart';
+import 'package:tuition_app/features/teacher/timetable_screens.dart' show ClassTimeScreen, TimetableScreen;
+import 'package:tuition_app/features/teacher/worked_solutions.dart' show WorkedSolutions;
 import 'package:tuition_app/theme.dart';
-import 'package:tuition_app/ui/kit.dart' show Pressable;
+import 'package:tuition_app/ui/kit.dart' show Pressable, SecondaryButton;
+import 'package:tuition_app/ui/picture.dart' show pngOf;
 import 'package:tuition_app/ui/qr.dart' show qrPicture;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -119,21 +130,38 @@ Future<http.Response> _answer(http.Request r) async {
   return http.Response.bytes(utf8.encode(jsonEncode(out)), 200, headers: {'content-type': 'application/json'});
 }
 
-/// The tuition's AI credit lines, newest first (the server's historyOf): they add up to ₹80.40.
+/// The tuition's AI credit lines, newest first (the server's historyOf): Free's start, some AI work, then Basic bought and its AI
+/// for the month topping the credit up to ₹300. They add up: ₹264.20 is left.
 List<Map<String, Object?>> _creditLines() => [
+      {'kind': 'solutions', 'amount_paise': -520, 'at': _iso(const Duration(hours: -1)), 'label': 'Unit test 3', 'paper_id': null, 'test_id': 'ws', 'solutions': 13},
       {'kind': 'page', 'amount_paise': -720, 'at': _iso(const Duration(hours: -2)), 'label': 'Quadratic equations', 'paper_id': 'p-1', 'pages': 3},
       {'kind': 'questions', 'amount_paise': -900, 'at': _iso(const Duration(hours: -5)), 'label': 'Real numbers', 'paper_id': 'p-2', 'questions': 15},
-      {'kind': 'topup', 'amount_paise': 10000, 'at': _iso(const Duration(days: -1)), 'label': null, 'paper_id': null, 'ref': 'CR-7K3Q'},
-      {'kind': 'page', 'amount_paise': -1440, 'at': _iso(const Duration(days: -3)), 'label': 'Triangles, unit test', 'paper_id': 'p-3', 'pages': 6},
+      {'kind': 'page', 'amount_paise': -1440, 'at': _iso(const Duration(hours: -20)), 'label': 'Triangles, unit test', 'paper_id': 'p-3', 'pages': 6},
+      {'kind': 'plan', 'amount_paise': 28900, 'at': _iso(const Duration(days: -1)), 'label': 'Basic plan', 'paper_id': null},
       {'kind': 'questions', 'amount_paise': -420, 'at': _iso(const Duration(days: -4)), 'label': 'Light', 'paper_id': 'p-4', 'questions': 7},
       {'kind': 'page', 'amount_paise': -480, 'at': _iso(const Duration(days: -5)), 'label': 'Polynomials', 'paper_id': 'p-5', 'pages': 2},
       {'kind': 'start', 'amount_paise': 2000, 'at': _iso(const Duration(days: -8)), 'label': null, 'paper_id': null},
     ];
 
-/// What the AI credit screen asks for (GET /teacher/credit). The UPI id is a stand-in: the startup has no payment account yet.
-Map<String, Object?> _creditAnswer({int balance = 8040, bool open = true, List<Object?> waiting = const [], List<Object?>? recent}) => {
+/// What the AI credit screen asks for (GET /teacher/credit), with the plan the AI comes with: Basic by default, as above. Credit is no
+/// longer sold on its own (`topups` false); `pay` and `waiting` stay for payments made before plans. The UPI id is a stand-in: the
+/// startup has no payment account yet.
+Map<String, Object?> _creditAnswer({
+  int balance = 8040,
+  bool open = true,
+  String plan = 'basic',
+  List<String> onSale = const ['basic', 'pro'],
+  List<Object?> waiting = const [],
+  List<Object?>? recent,
+}) =>
+    {
       'credit': {'balance_paise': balance, 'free_paise': balance},
-      'prices': {'page_paise': 240, 'question_paise': 60},
+      'prices': {'page_paise': 240, 'question_paise': 60, 'solution_paise': 40},
+      'plan': {
+        'name': plan, 'last_day': plan == 'free' ? null : '2027-02-23', 'next_month_on': plan == 'free' ? null : '2026-12-24',
+        'plans_on_sale': onSale,
+      },
+      'topups': false,
       'pay': {
         'open': open,
         'upi_id': open ? 'upi-id@bank' : null,
@@ -145,12 +173,34 @@ Map<String, Object?> _creditAnswer({int balance = 8040, bool open = true, List<O
       'recent': recent ?? _creditLines().take(5).toList(),
     };
 
+/// What the plan screen asks for (GET /teacher/plan): the plan today, its room used, the AI left, the three plans with stand-in
+/// prices (the real ones are set in the admin app), and how to pay. The UPI id is a stand-in, as above.
+Map<String, Object?> _planAnswer({String plan = 'free', int students = 14, int tutors = 1, int balance = 1240, bool open = true, bool owner = true, List<Object?> waiting = const []}) => {
+      'plan': {
+        'name': plan, 'bought': plan, 'from': plan == 'free' ? null : '2026-11-24', 'until': plan == 'free' ? null : '2027-02-24',
+        'last_day': plan == 'free' ? null : '2027-02-23', 'lapsed': false, 'next_month_on': plan == 'free' ? null : '2026-12-24',
+      },
+      'used': {'students': students, 'tutors': tutors},
+      'plans': [
+        {'name': 'free', 'students': 20, 'tutors': 1, 'ai_month_paise': 0, 'ai_start_paise': 2000, 'price_month_paise': null},
+        {'name': 'basic', 'students': 100, 'tutors': 3, 'ai_month_paise': 30000, 'ai_start_paise': 0, 'price_month_paise': open ? 49900 : null},
+        {'name': 'pro', 'students': 300, 'tutors': 10, 'ai_month_paise': 90000, 'ai_start_paise': 0, 'price_month_paise': open ? 99900 : null},
+      ],
+      'ai': {'balance_paise': balance, 'free_paise': balance},
+      'owner': owner,
+      'pay': {
+        'open': open, 'here': true, 'where': 'both', 'for_sale': open ? ['basic', 'pro'] : <String>[], 'months': [1, 3, 6, 12],
+        'upi_id': open ? 'upi-id@bank' : null, 'upi_name': open ? 'Tuition Tests' : null, 'code': open ? 'CR-7K3Q' : null,
+      },
+      'waiting': waiting,
+    };
+
 /// The server's refusal when the credit does not cover a page.
 http.Response _noCreditReply({int have = 0, int needed = 240}) => http.Response.bytes(
       utf8.encode(jsonEncode({
         'error': {
           'code': 'no_credit',
-          'message': 'This needs ${inr(needed)} of AI credit and you have ${inr(have)}. Add credit to carry on.',
+          'message': 'This needs ${inr(needed)} of AI and you have ${inr(have)} left. Move to Basic or Pro for AI every month.',
           'credit_paise': have,
           'needed_paise': needed,
         },
@@ -165,12 +215,44 @@ Map<String, Object?> _tuition({int pending = 2, bool open = true, String role = 
     };
 
 /// The app's theme, with the maths package's faces to fall back on for the symbols Geist does not have (the box a reader leaves where a
-/// page could not be read, theta): the phone's own fonts fill those in, and a test has none.
+/// page could not be read, theta), and Windows' Nirmala UI for Hindi and Tamil: the phone's own fonts fill those in, and a test has none.
 ThemeData _theme(bool dark) {
   final base = buildTheme(dark ? Brightness.dark : Brightness.light);
   return base.copyWith(
-    textTheme: base.textTheme.apply(fontFamilyFallback: const ['packages/flutter_math_fork/KaTeX_AMS', 'packages/flutter_math_fork/KaTeX_Main', 'packages/flutter_math_fork/KaTeX_Math']),
+    textTheme: base.textTheme.apply(fontFamilyFallback: const [
+      'packages/flutter_math_fork/KaTeX_AMS', 'packages/flutter_math_fork/KaTeX_Main', 'packages/flutter_math_fork/KaTeX_Math', 'Nirmala',
+    ]),
   );
+}
+
+/// A figure as a question paper prints one: a right triangle ABC with two sides marked, as PNG bytes. Needs the real event loop.
+Future<Uint8List> _trianglePng() async {
+  final recorder = ui.PictureRecorder();
+  final c = Canvas(recorder);
+  c.drawRect(const Rect.fromLTWH(0, 0, 480, 330), Paint()..color = const Color(0xFFFFFFFF));
+  final pen = Paint()
+    ..color = const Color(0xFF111111)
+    ..style = PaintingStyle.stroke
+    ..strokeWidth = 3;
+  c.drawPath(Path()..moveTo(110, 50)..lineTo(110, 270)..lineTo(410, 270)..close(), pen);
+  c.drawRect(const Rect.fromLTWH(110, 246, 24, 24), pen..strokeWidth = 2);
+  void label(String s, Offset at) {
+    final p = (ui.ParagraphBuilder(ui.ParagraphStyle(fontFamily: 'Geist', fontSize: 26))
+          ..pushStyle(ui.TextStyle(color: const Color(0xFF111111)))
+          ..addText(s))
+        .build()
+      ..layout(const ui.ParagraphConstraints(width: 200));
+    c.drawParagraph(p, at);
+  }
+
+  label('A', const Offset(84, 26));
+  label('B', const Offset(80, 266));
+  label('C', const Offset(418, 256));
+  label('3 cm', const Offset(36, 146));
+  label('4 cm', const Offset(232, 280));
+  final image = await recorder.endRecording().toImage(480, 330);
+  final data = await image.toByteData(format: ui.ImageByteFormat.png);
+  return data!.buffer.asUint8List();
 }
 
 Future<void> _show(WidgetTester t, Widget screen, {bool dark = false, double height = 2400}) async {
@@ -275,6 +357,12 @@ void main() {
       for (final style in e.value) {
         loader.addFont(rootBundle.load('packages/flutter_math_fork/lib/katex_fonts/fonts/${e.key}-$style.ttf'));
       }
+      await loader.load();
+    }
+    // Hindi and Tamil, from Windows' own font for them where it is there (a phone has its own).
+    final nirmala = File(r'C:\Windows\Fonts\Nirmala.ttc');
+    if (nirmala.existsSync()) {
+      final loader = FontLoader('Nirmala')..addFont(nirmala.readAsBytes().then(ByteData.sublistView));
       await loader.load();
     }
     // The first use of the API client makes its http client, so it is made with the stub.
@@ -489,8 +577,13 @@ void main() {
               'attempt': {'id': 'att', 'attempt_no': 1, 'submitted_at': _iso(const Duration(days: -1, hours: -2)), 'deadline_at': null, 'score': 8, 'max_score': 10},
             },
           ],
+          'attendance': {'classes': 14, 'present': 13, 'absent_days': [dayKey(DateTime.now().subtract(const Duration(days: 4)))]},
+          'fee': {
+            'left': 150000, 'month': null,
+            'owing': [{'month': dayKey(DateTime.now()).substring(0, 7), 'left': 150000, 'status': 'unpaid', 'late': false, 'due_on': dayKey(DateTime.now().add(const Duration(days: 3)))}],
+          },
         };
-    await _both(t, 'student-home', () => const StudentHome());
+    await _both(t, 'student-home', () => const StudentHome(), height: 2600);
     await _both(t, 'student-start', () => const StudentHome(), then: (t) async {
       await t.tap(find.text('Start test').first);
       await _settle(t);
@@ -633,12 +726,215 @@ void main() {
               {'chapter': n, 'correct': c, 'total': tt},
           ],
           'missed': [{'id': 'x', 'title': 'Unit test 2', 'closes_at': _iso(const Duration(days: -6))}],
+          'attendance': {
+            'classes': 22, 'present': 20,
+            'absent_days': [dayKey(DateTime.now().subtract(const Duration(days: 3))), dayKey(DateTime.now().subtract(const Duration(days: 11)))],
+          },
+          'fee': {
+            'fee': 150000, 'due_day': 5, 'set': true, 'left': 0, 'owing': <Object?>[],
+            'month': {'month': dayKey(DateTime.now()).substring(0, 7), 'fee': 150000, 'paid': 150000, 'claimed': 0, 'status': 'paid', 'left': 0, 'late': false},
+          },
         };
     await _both(t, 'tutor-student', () => const StudentDetailScreen(id: 's-1'), height: 2600);
     await _both(t, 'tutor-student-menu', () => const StudentDetailScreen(id: 's-1'), height: 2400, then: (t) async {
       await t.tap(find.bySemanticsLabel('More'));
       await _settle(t);
     });
+    // The report for parents with a line from the tutor, and the picture it shares, saved from each theme: the two
+    // pictures must both be light.
+    await _both(t, 'parent-report', () => const ParentReportScreen(id: 's-1'), height: 2800, then: (t) async {
+      await t.enterText(find.byType(TextField).first, 'Harini works hard and asks good questions. Ten minutes of polynomials a day will lift her marks.');
+      await _settle(t);
+      if (_shots) {
+        await t.runAsync(() async {
+          final boundary = t.renderObject<RenderRepaintBoundary>(
+              find.descendant(of: find.byKey(ParentReportScreen.cardKey), matching: find.byType(RepaintBoundary)).first);
+          File('../tools/out/shots/parent-report-picture-from-${isDark ? 'dark' : 'light'}.png')
+            ..createSync(recursive: true)
+            ..writeAsBytesSync(await reportPicture(boundary));
+        });
+      }
+    });
+  });
+
+  shotTest('tutor: a test printed', (t) async {
+    _sessionAs(role: 'teacher', tuitions: [{'id': 't-1', 'name': 'Priya Maths Classes', 'role': 'owner', 'status': 'active'}]);
+    final triangle = (await t.runAsync(_trianglePng))!;
+    // Kept too, to put the same figure in a test on the phone.
+    if (_shots) {
+      File('../tools/out/shots/print-figure.png')
+        ..createSync(recursive: true)
+        ..writeAsBytesSync(triangle);
+    }
+    routes['/figures/triangle.png'] = (_) => http.Response.bytes(triangle, 200, headers: {'content-type': 'image/png'});
+    // Maths written as LaTeX, a table, a figure, Hindi, Tamil, and options of every length: enough for three pages and the key.
+    final questions = <(String, List<String>, int, bool)>[
+      (r'If $3x + 5 = 20$, then $x$ is', ['3', '5', '15', '25'], 1, false),
+      (r'The value of $\frac{3}{4} + \frac{1}{8}$ is', [r'$\frac{7}{8}$', r'$\frac{4}{12}$', r'$\frac{1}{2}$', r'$\frac{5}{8}$'], 0, false),
+      ('In the figure, ABC is a right triangle with AB = 3 cm and BC = 4 cm. The length of AC is', ['5 cm', '6 cm', '7 cm', '12 cm'], 0, true),
+      (_iqTable, [r'$\frac{1}{12}$', r'$\frac{1}{6}$', r'$\frac{5}{6}$', r'$\frac{1}{10}$'], 0, false),
+      ('निम्नलिखित में से कौन-सी संख्या अभाज्य है?', ['21', '27', '29', '33'], 2, false),
+      ('பின்வருவனவற்றுள் எது ஒரு பகா எண்?', ['15', '17', '21', '25'], 1, false),
+      ('Which of these is true of rational and irrational numbers?',
+          ['Every rational number is an integer', 'Every integer is a rational number', 'The sum of two irrational numbers is always irrational', 'Zero is not a rational number'], 1, false),
+      ('A shopkeeper buys a pen for ₹40 and sells it for ₹50. What does he make?', ['20 percent profit', '25 percent profit', '20 percent loss', '25 percent loss'], 1, false),
+      (r'Solve: $x^2 - 5x + 6 = 0$', [r'$x = 2, 3$', r'$x = -2, -3$', r'$x = 1, 6$', r'$x = -1, -6$'], 0, false),
+      ('The HCF of 26 and 91 is', ['7', '13', '26', '91'], 1, false),
+      (r'The area of a circle of radius 7 cm is (take $\pi = \frac{22}{7}$)', ['44 cm²', '154 cm²', '49 cm²', '22 cm²'], 1, false),
+      (r'How many zeroes does the polynomial $p(x) = x^2 - 4$ have?', ['0', '1', '2', '4'], 2, false),
+      ('The point (−3, 5) lies in the', ['first quadrant', 'second quadrant', 'third quadrant', 'fourth quadrant'], 1, false),
+      (r'If $\sin \theta = \frac{3}{5}$, then $\cos \theta$ is', [r'$\frac{4}{5}$', r'$\frac{3}{4}$', r'$\frac{5}{3}$', r'$\frac{5}{4}$'], 0, false),
+      ('The mean of the first five natural numbers is', ['2', '2.5', '3', '5'], 2, false),
+      ('A die is thrown once. The probability of getting an even number is', [r'$\frac{1}{6}$', r'$\frac{1}{3}$', r'$\frac{1}{2}$', r'$\frac{2}{3}$'], 2, false),
+      ('Two coins are tossed together. The probability of getting at least one head is', [r'$\frac{1}{4}$', r'$\frac{1}{2}$', r'$\frac{3}{4}$', '1'], 2, false),
+      ('Which of these has a terminating decimal expansion?', [r'$\frac{13}{3125}$', r'$\frac{17}{6}$', r'$\frac{64}{455}$', r'$\frac{29}{343}$'], 0, false),
+    ];
+    routes['/teacher/tests/tp'] = (_) => {
+          'test': {
+            'id': 'tp', 'title': 'Unit test 3: Numbers and algebra', 'class_level': 9, 'subject_id': 'm', 'subject': 'Maths', 'course_id': null, 'course': null,
+            'time_limit_min': 45, 'status': 'published', 'attempts': 0,
+          },
+          'questions': [
+            for (final (i, (text, options, right, figure)) in questions.indexed)
+              {
+                'id': 'q$i', 'position': i + 1, 'text': text, 'options': options, 'correct_option': right, 'marks': 1, 'keep_option_order': false,
+                'image_url': figure ? 'https://figs.test/figures/triangle.png' : null,
+              },
+          ],
+          'students': <Object?>[],
+        };
+    int pageCount() {
+      var n = 0;
+      while (find.byKey(PrintTestScreen.pageKey(n)).evaluate().isNotEmpty) {
+        n++;
+      }
+      return n;
+    }
+
+    RenderRepaintBoundary page(int i) =>
+        t.renderObject<RenderRepaintBoundary>(find.descendant(of: find.byKey(PrintTestScreen.pageKey(i)), matching: find.byType(RepaintBoundary)).first);
+    // Each page as the PDF gets it, from each theme: a page is the same whatever the phone shows.
+    final fromLight = <Uint8List>[];
+    await _both(t, 'print-test', () => const PrintTestScreen(id: 'tp'), height: 3000, then: (t) async {
+      await settle(t); // the figure is decoded on the real event loop
+      await _settle(t);
+      await t.tap(find.text('With answer key'));
+      await _settle(t);
+      final n = pageCount();
+      expect(n, greaterThanOrEqualTo(3), reason: 'questions over two pages or more, then the key');
+      for (var i = 0; i < n; i++) {
+        expect(t.getSize(find.byKey(PrintTestScreen.contentKey(i))).height, lessThanOrEqualTo(PrintTestScreen.contentHeight + 0.5),
+            reason: 'page ${i + 1} holds no more than fits on it');
+      }
+      expect(find.descendant(of: find.byKey(PrintTestScreen.pageKey(n - 1)), matching: find.text('Answer key')), findsOneWidget);
+      expect(find.text('PRIYA MATHS CLASSES'), findsNWidgets(2));
+      for (var i = 0; i < n; i++) {
+        final png = (await t.runAsync(() => pngOf(page(i), pixelRatio: _shots ? 3 : 1)))!;
+        if (!isDark) {
+          fromLight.add(png);
+          if (_shots) {
+            File('../tools/out/shots/print-page-${i + 1}.png')
+              ..createSync(recursive: true)
+              ..writeAsBytesSync(png);
+          }
+        } else {
+          expect(png, fromLight[i], reason: 'page ${i + 1} is the same from the dark theme');
+        }
+      }
+      if (_shots && !isDark) {
+        final pdf = (await t.runAsync(() => testPdf([for (var i = 0; i < n; i++) page(i)], title: 'Unit test 3: Numbers and algebra', author: 'Priya Maths Classes')))!;
+        File('../tools/out/shots/print-test.pdf')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(pdf);
+      }
+    });
+    // The test's own page, where printing starts: its button is there to press once the test has questions.
+    routes['/teacher/tests/tp/results'] = (_) => {
+          'test': {
+            'id': 'tp', 'title': 'Unit test 3: Numbers and algebra', 'status': 'published', 'course_id': null, 'course': null, 'class_level': 9, 'subject': 'Maths',
+            'time_limit_min': 45, 'opens_at': _iso(const Duration(days: -1)), 'closes_at': _iso(const Duration(hours: 5)), 'shuffle': true,
+          },
+          'summary': {'average_pct': 0.71, 'high_pct': 0.94, 'low_pct': 0.39, 'submitted': 9, 'assigned': 14, 'missed': 0, 'writing': 2},
+          'students': <Object?>[],
+          'questions': [
+            for (final (i, (text, _, right, _)) in questions.take(4).indexed)
+              {'id': 'q$i', 'n': i + 1, 'text': text, 'correct_option': right, 'correct_pct': [0.89, 0.67, 0.78, 0.44][i], 'most_picked_wrong': 2,
+                'option_counts': [1, 6, 2, 0], 'skipped': 0},
+          ],
+        };
+    await _both(t, 'print-from-test-page', () => const TestResultsScreen(id: 'tp'), then: (t) async {
+      final button = t.widget<SecondaryButton>(find.widgetWithText(SecondaryButton, 'Print as PDF'));
+      expect(button.onTap, isNotNull, reason: 'a test with questions can be printed');
+    });
+    // The key is left out until the tutor asks for it, and then has a page of its own.
+    await _show(t, const PrintTestScreen(id: 'tp'), height: 3000);
+    await settle(t);
+    await _settle(t);
+    final questionsOnly = pageCount();
+    expect(find.text('Answer key'), findsNothing);
+    await t.tap(find.text('With answer key'));
+    await _settle(t);
+    expect(pageCount(), questionsOnly + 1);
+    expect(find.text('Answer key'), findsOneWidget);
+    await t.pumpWidget(const SizedBox.shrink());
+  });
+
+  shotTest('tutor: a test printed with a case study, a long table and marks that differ', (t) async {
+    _sessionAs(role: 'teacher', tuitions: [{'id': 't-1', 'name': 'Priya Maths Classes', 'role': 'owner', 'status': 'active'}]);
+    const passage = "Johan and Jayant are very close friends. They decided to go to Ranikhet with their families in separate cars. Johan's car travels at a "
+        "speed of \$x\$ km/hr while Jayant's car travels 5 km/hr faster than Johan's car. Johan took 4 hours more than Jayant to complete the "
+        'journey of 400 km.';
+    const study = 'CASE STUDY 1: A JOURNEY TO RANIKHET\n\n$passage\n\n';
+    final rows = [for (var i = 0; i < 30; i++) '| ${10 + i * 5}–${15 + i * 5} | ${(i * 7) % 23 + 1} |'].join('\n');
+    final questions = <(String, List<String>, int, num)>[
+      (r'If $2x - 3 = 7$, then $x$ is', ['2', '5', '7', '10'], 1, 1),
+      ("${study}The speed of Johan's car is (in km/hr)", ['20', '15', '25', '10'], 0, 1),
+      ('${study}The equation that gives \$x\$ is', [r'$x^2 + 5x - 500 = 0$', r'$x^2 - 5x - 500 = 0$', r'$x^2 + 5x + 500 = 0$', r'$x^2 - 500 = 0$'], 0, 2),
+      ('${study}How long did Jayant take for the journey?', ['16 hours', '20 hours', '24 hours', '12 hours'], 0, 1),
+      ('The marks of 30 groups of pupils are given below.\n\n| Marks | Pupils |\n|---|---|\n$rows\n\nThe modal class is', ['65–70', '70–75', '75–80', '80–85'], 2, 2),
+      (r'The value of $\sqrt{49}$ is', ['5', '6', '7', '8'], 2, 1),
+    ];
+    routes['/teacher/tests/tm'] = (_) => {
+          'test': {'id': 'tm', 'title': 'Unit test 4: Quadratic equations', 'class_level': 10, 'subject': 'Maths', 'course_id': null, 'time_limit_min': 30},
+          'questions': [
+            for (final (i, (text, options, right, marks)) in questions.indexed)
+              {'id': 'm$i', 'position': i + 1, 'text': text, 'options': options, 'correct_option': right, 'marks': marks, 'image_url': null},
+          ],
+          'students': <Object?>[],
+        };
+    await _show(t, const PrintTestScreen(id: 'tm'), height: 3000);
+    await _settle(t);
+    var n = 0;
+    while (find.byKey(PrintTestScreen.pageKey(n)).evaluate().isNotEmpty) {
+      n++;
+    }
+    var shrunk = 0;
+    for (var i = 0; i < n; i++) {
+      if (find.byKey(PrintTestScreen.shrunkKey(i)).evaluate().isNotEmpty) {
+        shrunk++;
+      } else {
+        expect(t.getSize(find.byKey(PrintTestScreen.contentKey(i))).height, lessThanOrEqualTo(PrintTestScreen.contentHeight + 0.5),
+            reason: 'page ${i + 1} holds no more than fits on it');
+      }
+    }
+    expect(shrunk, 1, reason: 'the table taller than a page is drawn smaller, on a page of its own');
+    expect(find.textContaining('Johan and Jayant are very close friends'), findsOneWidget, reason: 'the passage is printed once');
+    expect(find.text('Read this and answer questions 2 to 4.'), findsOneWidget);
+    expect(find.textContaining("The speed of Johan's car"), findsOneWidget);
+    expect(find.textContaining('How long did Jayant take'), findsOneWidget);
+    expect(find.text('[2]'), findsNWidgets(2), reason: 'marks show beside each question when they differ');
+    expect(find.text('[1]'), findsNWidgets(4));
+    if (_shots) {
+      for (var i = 0; i < n; i++) {
+        final boundary =
+            t.renderObject<RenderRepaintBoundary>(find.descendant(of: find.byKey(PrintTestScreen.pageKey(i)), matching: find.byType(RepaintBoundary)).first);
+        final png = (await t.runAsync(() => pngOf(boundary)))!;
+        File('../tools/out/shots/print-mixed-page-${i + 1}.png')
+          ..createSync(recursive: true)
+          ..writeAsBytesSync(png);
+      }
+    }
+    await t.pumpWidget(const SizedBox.shrink());
   });
 
   shotTest('tutor: checking a paper', (t) async {
@@ -1004,6 +1300,7 @@ void main() {
         'course_id': course == null ? null : 'c-1', 'course': course, 'page_count': pages, 'pages_read': read, 'to_check': toCheck, 'saved': saved,
         'has_test': false, 'created_at': _iso(const Duration(hours: -3)),
       };
+  // Home's credit carries the plan the AI comes with, as the server's does: Basic by default, since ₹80.40 is more than Free's start.
   Map<String, Object?> home({
     int pending = 0,
     List<Object?>? groups,
@@ -1011,6 +1308,8 @@ void main() {
     List<Object?> finished = const [],
     List<Object?> papers = const [],
     int credit = 8040,
+    String plan = 'basic',
+    List<String> onSale = const ['basic', 'pro'],
   }) =>
       {
         'server_now': _iso(Duration.zero),
@@ -1021,10 +1320,15 @@ void main() {
         'courses': courses ?? [],
         'finished': finished,
         'papers': papers,
-        'credit': {'balance_paise': credit, 'free_paise': credit, 'page_paise': 240, 'question_paise': 60},
+        'credit': {
+          'balance_paise': credit, 'free_paise': credit, 'page_paise': 240, 'question_paise': 60, 'solution_paise': 40,
+          'plan': plan, 'next_month_on': plan == 'free' ? null : '2026-12-24', 'plans_on_sale': onSale,
+        },
       };
-  Map<String, Object?> busyHome({bool open = true, int credit = 8040}) => home(
+  Map<String, Object?> busyHome({bool open = true, int credit = 8040, String plan = 'basic', List<String> onSale = const ['basic', 'pro']}) => home(
         credit: credit,
+        plan: plan,
+        onSale: onSale,
         pending: 1,
         groups: [
           group(10, 'Maths', 12, live: open ? [openTest('x1', 'Practice Paper 2', closes: const Duration(hours: 3), submitted: 7)] : const [], posted: [
@@ -1132,30 +1436,48 @@ void main() {
   // ---- AI credit: the balance on Home, the AI credit screen, adding credit, and the price before AI work (design/comps/w1-*.html)
   shotTest('tutor: AI credit', (t) async {
     _sessionAs(role: 'teacher', tuitions: tutorTuition);
-    // Home when the credit has run out: the balance turns amber and a note says what still works.
+    // Home when Basic's AI for the month has run out: the balance turns amber and a note says when more comes, and that Pro has more.
     routes['/teacher/home'] = (_) => busyHome(credit: 0);
     await _both(t, 'credit-home-out', () => const Scaffold(body: TutorHome()), height: 2700);
+    // And on Free, once its start is spent: the note names the plans that give AI every month.
+    routes['/teacher/home'] = (_) => busyHome(credit: 0, plan: 'free');
+    await _both(t, 'credit-home-out-free', () => const Scaffold(body: TutorHome()), height: 2700);
     // ₹1.20 pays for two questions but not a page: amber, and no note.
     routes['/teacher/home'] = (_) => busyHome(credit: 120);
     await _both(t, 'credit-home-low', () => const Scaffold(body: TutorHome()));
 
-    // The AI credit screen, with a payment waiting to be checked.
-    final waiting = {'id': 'r-1', 'amount_paise': 25000, 'code': 'CR-7K3Q', 'upi_id': 'upi-id@bank', 'status': 'waiting', 'created_at': _iso(const Duration(minutes: -20)), 'decided_at': null};
-    routes['/teacher/credit'] = (_) => _creditAnswer(waiting: [waiting]);
+    // The AI credit screen on Basic: the balance, when the plan gives more, and the last few lines.
+    routes['/teacher/credit'] = (_) => _creditAnswer(balance: 26420);
     await _both(t, 'credit', () => const CreditScreen(), height: 3000);
-    // A new tuition's first day: the free credit, before adding credit opens.
-    routes['/teacher/credit'] = (_) => _creditAnswer(balance: 2000, open: false, recent: [_creditLines().last]);
+    // A new tuition's first day: Free's start, before any plan is on sale.
+    routes['/teacher/credit'] = (_) => _creditAnswer(balance: 2000, plan: 'free', onSale: const [], recent: [_creditLines().last]);
     await _both(t, 'credit-new', () => const CreditScreen());
     // Every line.
     routes['/teacher/credit/history'] = (_) => {'lines': _creditLines(), 'more': false};
     await _both(t, 'credit-history', () => const CreditHistoryScreen());
 
-    // Adding credit: an amount, how to pay, then "I have paid". And before the developer has set up a UPI id.
+  });
+
+  // ---- Plans: the plan and its room, the three plans, buying one, and the payment once sent
+  shotTest('tutor: plans', (t) async {
+    _sessionAs(role: 'teacher', tuitions: tutorTuition);
     routes['/teacher/credit'] = (_) => _creditAnswer();
-    await _both(t, 'credit-add', () => const AddCreditScreen(), height: 2600);
-    routes['/teacher/credit'] = (_) => _creditAnswer(open: false);
-    await _both(t, 'credit-add-closed', () => const AddCreditScreen());
-    await _both(t, 'credit-sent', () => CreditSentScreen(request: {...waiting, 'created_at': _iso(Duration.zero)}));
+    routes['/teacher/plan'] = (_) => _planAnswer();
+    await _both(t, 'plan-free', () => const PlanScreen(), height: 3400);
+    final request = {
+      'id': 'pr-1', 'plan': 'pro', 'months': 3, 'amount_paise': 299700, 'code': 'CR-7K3Q', 'upi_id': 'upi-id@bank', 'status': 'waiting',
+      'created_at': _iso(const Duration(minutes: -20)), 'decided_at': null,
+    };
+    routes['/teacher/plan'] = (_) => _planAnswer(plan: 'basic', students: 64, tutors: 3, balance: 21240, waiting: [request]);
+    await _both(t, 'plan-basic', () => const PlanScreen(), height: 3600);
+    // Before the developer has set prices and a UPI id.
+    routes['/teacher/plan'] = (_) => _planAnswer(open: false);
+    await _both(t, 'plan-closed', () => const PlanScreen(), height: 3200);
+    routes['/teacher/plan'] = (_) => _planAnswer();
+    await _both(t, 'plan-buy', () => const BuyPlanScreen(plan: 'basic'), height: 2800);
+    routes['/teacher/plan'] = (_) => _planAnswer(plan: 'basic', students: 64, tutors: 3, balance: 21240);
+    await _both(t, 'plan-buy-pro', () => const BuyPlanScreen(plan: 'pro'), height: 2800);
+    await _both(t, 'plan-sent', () => PlanSentScreen(request: {...request, 'created_at': _iso(Duration.zero)}));
   });
 
   shotTest('tutor: the price before AI work', (t) async {
@@ -1204,10 +1526,14 @@ void main() {
 
   shotTest('tutor: deleting the tuition', (t) async {
     _sessionAs(role: 'teacher', tuitions: tutorTuition);
-    // Credit left and a payment still waiting: the screen names both.
-    final waiting = {'id': 'r-1', 'amount_paise': 25000, 'code': 'CR-7K3Q', 'upi_id': 'upi-id@bank', 'status': 'waiting', 'created_at': _iso(const Duration(minutes: -20)), 'decided_at': null};
-    routes['/teacher/credit'] = (_) => _creditAnswer(waiting: [waiting]);
-    await _both(t, 'delete-tuition', () => const DeleteTuitionScreen(), height: 2400, then: (t) async {
+    // Credit left, Basic still running and three more months of it paid for but not yet checked: the screen names all three.
+    final request = {
+      'id': 'pr-1', 'plan': 'basic', 'months': 3, 'amount_paise': 149700, 'code': 'CR-7K3Q', 'upi_id': 'upi-id@bank', 'status': 'waiting',
+      'created_at': _iso(const Duration(minutes: -20)), 'decided_at': null,
+    };
+    routes['/teacher/credit'] = (_) => _creditAnswer(balance: 26420);
+    routes['/teacher/plan'] = (_) => _planAnswer(plan: 'basic', students: 64, tutors: 3, balance: 26420, waiting: [request]);
+    await _both(t, 'delete-tuition', () => const DeleteTuitionScreen(), height: 2600, then: (t) async {
       await t.enterText(find.byType(TextField), 'my-password');
       await _settle(t);
     });
@@ -1635,8 +1961,10 @@ void main() {
       await tapScrolled(t, 'Aarav Kumar');
       await tapScrolled(t, 'Diya Nair');
     });
-    // A new test for a group (no link leads to it in the app, but the page is there): its class and subject come first.
+    // A new test for a group: its class and subject come first. From a group's Make tests ("Or choose questions you have") they are
+    // chosen already.
     await _both(t, 'test-settings-new', () => const TestEditor(), height: 2700);
+    await _both(t, 'test-settings-new-group', () => const TestEditor(classLevel: 10, subjectId: 'sub-Maths'), height: 2700);
     // One students have started: its questions are fixed, it is saved with "Save changes", and it can still be deleted.
     routes['/teacher/tests/t-8'] = (_) => groupTest(status: 'published', attempts: 3, opens: const Duration(days: -1));
     await _both(t, 'test-settings-posted', () => const TestEditor(id: 't-8'), height: 2700);
@@ -1661,6 +1989,346 @@ void main() {
           'questions': <Object?>[],
         };
     await _both(t, 'test-page', () => const TestResultsScreen(id: 't-9'));
+  });
+
+  // Worked solutions written by AI. A posted test's results: how many questions have one and the price of the rest, the card that asks
+  // first, and what it says after, naming the questions AI could not match. Then a draft's settings with the same card, and the question
+  // editor's note on a solution AI wrote, and on one whose answer has been changed since.
+  shotTest('tests: worked solutions', (t) async {
+    _sessionAs(role: 'teacher', tuitions: tutorTuition);
+    routes['/teacher/credit'] = (_) => _creditAnswer();
+    final texts = [
+      (r'If $3x + 5 = 20$, then $x$ is', ['3', '5', '15', '25'], 1),
+      ('The HCF of 26 and 91 is', ['7', '13', '26', '91'], 0),
+      (r'The value of $\frac{3}{4} + \frac{1}{8}$ is', [r'$\frac{7}{8}$', r'$\frac{4}{12}$', r'$\frac{1}{2}$', r'$\frac{5}{8}$'], 0),
+      ('In the figure, find the angle x.', ['30°', '45°', '60°', '90°'], 2),
+      ('Which of these numbers is prime?', ['21', '27', '29', '33'], 2),
+      (r'Solve: $x^2 - 5x + 6 = 0$', [r'$x = 2, 3$', r'$x = -2, -3$', r'$x = 1, 6$', r'$x = -1, -6$'], 0),
+    ];
+    // The questions that have a solution: the first, until AI writes more.
+    final has = <String>{};
+    TestResultsScreen fresh() {
+      has
+        ..clear()
+        ..add('w0');
+      return const TestResultsScreen(id: 'ws');
+    }
+
+    routes['/teacher/tests/ws/results'] = (_) => {
+          'test': {
+            'id': 'ws', 'title': 'Unit test 3', 'status': 'published', 'course_id': null, 'course': null, 'class_level': 9, 'subject': 'Maths',
+            'time_limit_min': 30, 'opens_at': _iso(const Duration(days: -1)), 'closes_at': _iso(const Duration(days: 2)), 'shuffle': true,
+          },
+          'summary': {'average_pct': 0.71, 'high_pct': 0.94, 'low_pct': 0.39, 'submitted': 9, 'assigned': 14, 'missed': 0, 'writing': 2},
+          'students': <Object?>[],
+          'questions': [
+            for (final (i, (text, options, right)) in texts.indexed)
+              {
+                'id': 'w$i', 'n': i + 1, 'text': text, 'options': options, 'correct_option': right, 'correct_pct': [0.89, 0.44, 0.67, 0.78, 0.56, 0.72][i],
+                'most_picked_wrong': 2, 'option_counts': [1, 6, 2, 0], 'skipped': 0, 'has_solution': has.contains('w$i'), 'solution_by_ai': false,
+              },
+          ],
+        };
+    routes['POST /teacher/tests/ws/solutions'] = (r) {
+      final ids = ((jsonDecode(r.body) as Map)['question_ids'] as List).cast<String>();
+      final out = [
+        for (final id in ids)
+          switch (id) {
+            'w1' => {'id': id, 'outcome': 'different', 'ai_answer': 1},
+            'w3' => {'id': id, 'outcome': 'figure'},
+            _ => {'id': id, 'outcome': 'written', 'solution': 'So 5.'},
+          },
+      ];
+      has.addAll([for (final o in out) if (o['outcome'] == 'written') '${o['id']}']);
+      return {'solutions': out, 'written': out.where((o) => o['outcome'] == 'written').length, 'credit_paise': 7880};
+    };
+    Future<void> toCard(WidgetTester t) async {
+      await t.ensureVisible(find.byType(WorkedSolutions));
+      await _settle(t);
+    }
+
+    await _both(t, 'solutions-results', fresh, height: 3400, then: (t) async {
+      expect(find.text('1 of 6 questions has a worked solution'), findsOneWidget);
+      expect(find.text('Write the other 5 with AI · ₹2.00'), findsOneWidget);
+    });
+    await _both(t, 'solutions-confirm', fresh, then: (t) async {
+      await toCard(t);
+      await t.tap(find.text('Write the other 5 with AI · ₹2.00'));
+      await _settle(t);
+      expect(find.text('Write 5 worked solutions with AI?'), findsOneWidget);
+    });
+    await _both(t, 'solutions-done', fresh, height: 3000, then: (t) async {
+      await toCard(t);
+      await t.tap(find.text('Write the other 5 with AI · ₹2.00'));
+      await _settle(t);
+      await t.tap(find.text('Write them'));
+      await _settle(t);
+      await _settle(t);
+      await toCard(t);
+      expect(find.text('4 of 6 questions have a worked solution'), findsOneWidget);
+      expect(find.textContaining('AI reached a different answer for question 2 (it reached B; A is marked).'), findsOneWidget);
+      expect(find.textContaining('Question 4 needs its figure, which AI cannot see.'), findsOneWidget);
+    });
+
+    // A draft's settings have the same card, under its questions.
+    final maths = {'id': 'sub-Maths', 'name': 'Maths', 'is_default': true};
+    routes['/teacher/subjects'] = (_) => {'subjects': [maths]};
+    routes['/teacher/students'] = (_) => {'students': <Object?>[]};
+    routes['/teacher/tests/wd'] = (_) => {
+          'test': {
+            'id': 'wd', 'title': 'Half-yearly paper', 'course_id': null, 'course': null, 'class_level': 9, 'subject_id': 'sub-Maths', 'time_limit_min': 60,
+            'opens_at': null, 'closes_at': _iso(const Duration(days: 4)), 'status': 'draft', 'shuffle': true, 'assign_group': true, 'assign_all': false, 'attempts': 0,
+          },
+          'questions': [
+            for (final (i, (text, options, right)) in texts.indexed)
+              {'id': 'w$i', 'text': text, 'options': options, 'correct_option': right, 'chapter': null, 'difficulty': 'medium', 'solution': i < 2 ? 'So 5.' : null},
+          ],
+          'students': <Object?>[],
+        };
+    await _both(t, 'solutions-draft', () => const TestEditor(id: 'wd'), height: 2700, then: (t) async {
+      expect(find.text('2 of 6 questions have a worked solution'), findsOneWidget);
+    });
+
+    // The question editor marks a solution AI wrote, and warns when the answer marked changes under it.
+    routes['/teacher/chapters'] = (_) => {'chapters': <Object?>[]};
+    routes['/teacher/questions/w0'] = (_) => {
+          'question': {
+            'id': 'w0', 'class_level': 9, 'course_id': null, 'subject_id': 'sub-Maths', 'chapter_id': null, 'text': texts[0].$1, 'options': texts[0].$2,
+            'correct_option': 1, 'solution': '\$3x + 5 = 20\$\n\$3x = 15\$\nSo \$x = 5\$.', 'solution_by_ai': true, 'marks': 1, 'keep_option_order': false,
+            'difficulty': 'easy', 'difficulty_by': 'tutor', 'image_key': null, 'image_url': null, 'used_in': 1,
+          },
+        };
+    const note = 'Written by AI, whose own working reached the answer marked. Change it as you like.';
+    // The editor builds what is on screen: scroll down to the solution, and keep its box and the note under it in view.
+    Future<void> toSolution(WidgetTester t, Finder under) async {
+      await t.scrollUntilVisible(under, 120, scrollable: find.byType(Scrollable).first, maxScrolls: 40);
+      await t.drag(find.byType(Scrollable).first, const Offset(0, -160));
+      await _settle(t);
+    }
+
+    await _both(t, 'solutions-question', () => const QuestionEditor(id: 'w0'), height: 2400, then: (t) async {
+      await toSolution(t, find.text(note));
+      expect(find.text(note), findsOneWidget);
+    });
+    await _both(t, 'solutions-question-rekeyed', () => const QuestionEditor(id: 'w0'), height: 2400, then: (t) async {
+      await t.tap(find.bySemanticsLabel('Mark option C as right'));
+      await _settle(t);
+      await toSolution(t, find.textContaining('so it is removed when you save'));
+      expect(find.text(note), findsNothing);
+    });
+  });
+
+  // Attendance: the button on a group's page with today's numbers, a register being taken with one student tapped away, the
+  // register saved with a message ready for each absent student's parents, and the month's registers.
+  // ---- The timetable: a group's page with its times, the timetable, a time being changed and none yet; then a student's Home with
+  // today's classes (Join for the one with a link) and, on a day with none, the next class.
+  shotTest('timetable', (t) async {
+    _sessionAs(role: 'teacher', tuitions: tutorTuition);
+    final times = <Map<String, Object?>>[
+      {'id': 'ct-1', 'weekdays': [1, 3, 5], 'starts_at': '16:30', 'minutes': 60, 'join_url': 'https://meet.google.com/abc-defg-hij', 'note': null},
+      {'id': 'ct-2', 'weekdays': [6], 'starts_at': '10:00', 'minutes': 90, 'join_url': null, 'note': 'Test practice, in the hall'},
+    ];
+    routes['/teacher/groups/10/sub-Maths'] = (_) => {
+          'students': [
+            for (final (i, n) in people.take(6).indexed)
+              {'id': 'a$i', 'display_name': n, 'username': 'u$i', 'active': true, 'last_seen_at': _iso(Duration(hours: -i)), 'avg_pct': 0.6 + i / 40, 'tests_done': 2},
+          ],
+          'tests': [courseTest('g1', 'Practice Paper 2', closes: const Duration(hours: 3), submitted: 5, writing: 1, assigned: 6)],
+          'attendance_today': {'taken': false, 'present': 0, 'absent': 0},
+          'times': times,
+        };
+    await _both(t, 'timetable-group', () => const GroupScreen(classLevel: 10, subjectId: 'sub-Maths', subjectName: 'Maths'), height: 1900);
+    routes['GET /teacher/class-times'] = (_) => {'times': times};
+    await _both(t, 'timetable', () => const TimetableScreen(ref: ClassRef.group(10, 'sub-Maths'), name: '10th Maths'), height: 1700);
+    await _both(t, 'timetable-time', () => ClassTimeScreen(ref: const ClassRef.group(10, 'sub-Maths'), name: '10th Maths', time: ClassTime.from(times.first)), height: 2500);
+    routes['GET /teacher/class-times'] = (_) => {'times': <Object?>[]};
+    await _both(t, 'timetable-none', () => const TimetableScreen(ref: ClassRef.group(10, 'sub-Maths'), name: '10th Maths'), height: 1700);
+
+    _sessionAs(role: 'student', tuitions: [{'id': 't-1', 'name': 'Priya Maths Classes', 'role': 'student', 'status': 'active', 'class_level': 10}]);
+    final classTests = [
+      {
+        'id': 'a', 'title': 'Linear equations', 'course_id': null, 'class_level': 10, 'time_limit_min': 20, 'opens_at': null, 'closes_at': _iso(const Duration(hours: 3, minutes: 10)),
+        'question_count': 12, 'max_marks': 12, 'state': 'open', 'retake': false, 'results_open': true, 'attempt': null,
+      },
+    ];
+    final today = <Map<String, Object?>>[
+      {...times.first, 'kind': 'group', 'name': 'Maths'},
+      {'id': 'ct-3', 'weekdays': [1, 3, 5], 'starts_at': '18:00', 'minutes': 45, 'join_url': null, 'note': 'Bring the lab book', 'kind': 'group', 'name': 'Science'},
+    ];
+    final next = {...times.last, 'kind': 'group', 'name': 'Maths', 'day': dayKey(DateTime.now().add(const Duration(days: 2)))};
+    routes['/student/home'] = (_) => {
+          'server_now': _iso(Duration.zero), 'tuition': {'id': 't-1', 'name': 'Priya Maths Classes'}, 'tests': classTests, 'courses': 0,
+          'classes': {'today': today, 'next': next},
+        };
+    await _both(t, 'timetable-student', () => const StudentHome(), height: 1900);
+    routes['/student/home'] = (_) => {
+          'server_now': _iso(Duration.zero), 'tuition': {'id': 't-1', 'name': 'Priya Maths Classes'}, 'tests': classTests, 'courses': 0,
+          'classes': {'today': <Object?>[], 'next': next},
+        };
+    await _both(t, 'timetable-student-next', () => const StudentHome(), height: 1900);
+  });
+
+  shotTest('attendance', (t) async {
+    _sessionAs(role: 'teacher', tuitions: tutorTuition);
+    final names = people.take(8).toList();
+    routes['/teacher/groups/10/sub-Maths'] = (_) => {
+          'students': [
+            for (final (i, n) in names.indexed)
+              {'id': 'a$i', 'display_name': n, 'username': 'u$i', 'active': true, 'last_seen_at': _iso(Duration(hours: -i)), 'avg_pct': 0.6 + i / 40, 'tests_done': 2},
+          ],
+          'tests': [courseTest('g1', 'Practice Paper 2', closes: const Duration(hours: 3), submitted: 5, writing: 1, assigned: 8)],
+          'attendance_today': {'taken': true, 'present': 7, 'absent': 1},
+        };
+    await _both(t, 'attendance-group', () => const GroupScreen(classLevel: 10, subjectId: 'sub-Maths', subjectName: 'Maths'), height: 1900);
+
+    final today = dayKey(DateTime.now());
+    var away = <String>[];
+    var taken = false;
+    routes['GET /teacher/attendance'] = (r) => {
+          'day': r.url.queryParameters['day'] ?? today, 'today': today,
+          'register': taken ? {'taken_at': _iso(const Duration(minutes: -2)), 'taken_by': 'Priya'} : null,
+          'students': [
+            for (final (i, n) in names.indexed) {'id': 'a$i', 'display_name': n, 'username': 'u$i', 'present': taken ? !away.contains('a$i') : null, 'in_class': true},
+          ],
+        };
+    routes['PUT /teacher/attendance'] = (r) {
+      away = ((jsonDecode(r.body) as Map)['absent'] as List).cast<String>();
+      taken = true;
+      return {
+        'day': today, 'present': names.length - away.length,
+        'absent': [for (final (i, n) in names.indexed) if (away.contains('a$i')) {'id': 'a$i', 'display_name': n}],
+      };
+    };
+    Widget register() {
+      taken = false;
+      away = [];
+      return const AttendanceScreen(ref: ClassRef.group(10, 'sub-Maths'), name: '10th Maths');
+    }
+
+    await _both(t, 'attendance-take', register, height: 2000, then: (t) async {
+      await t.tap(find.text(names[2]));
+      await _settle(t);
+      expect(find.text('Save · 7 here, 1 away'), findsOneWidget);
+    });
+    await _both(t, 'attendance-saved', register, height: 3600, then: (t) async {
+      await t.tap(find.text(names[2]));
+      await _settle(t);
+      await t.tap(find.text('Save · 7 here, 1 away'));
+      await _settle(t);
+      await _settle(t);
+      expect(find.text('TELL PARENTS'), findsOneWidget);
+    });
+
+    // A month of registers: every other day so far this month, a few with someone away.
+    final now = DateTime.now();
+    routes['/teacher/attendance/month'] = (_) => {
+          'month': today.substring(0, 7), 'today': today,
+          'days': [
+            for (var i = 0; i < now.day; i += 2)
+              {'day': dayKey(now.subtract(Duration(days: i))), 'present': 8 - (i % 6 == 0 ? 1 : 0), 'absent': i % 6 == 0 ? 1 : 0},
+          ],
+        };
+    await _both(t, 'attendance-month', () => const AttendanceMonthScreen(ref: ClassRef.group(10, 'sub-Maths'), name: '10th Maths'), height: 2400);
+  });
+
+  // Fees: a month's fees with a payment a student says they made, who has not paid (the late first) and who has; one student's
+  // fees; recording a payment, and its receipt as the picture that is shared; setting a fee for a group; the UPI id; the owner's
+  // Home; and the student's own fees, to pay by UPI. The UPI id is made up (examplebank), so the code in the picture pays nobody.
+  shotTest('fees', (t) async {
+    _sessionAs(role: 'teacher', tuitions: tutorTuition);
+    final now = DateTime.now();
+    final today = dayKey(now);
+    final month = today.substring(0, 7);
+    final last = dayKey(DateTime(now.year, now.month - 1)).substring(0, 7);
+    final older = dayKey(DateTime(now.year, now.month - 2)).substring(0, 7);
+    const upi = {'id': 'priya.classes@examplebank', 'name': 'Priya Sharma'};
+    Map<String, Object?> m(String mon, {int fee = 150000, int paid = 0, int claimed = 0, String status = 'unpaid', bool late = false}) => {
+          'month': mon, 'fee': fee, 'due_day': 5, 'due_on': '$mon-05', 'paid': paid, 'claimed': claimed, 'status': status, 'late': late,
+          'left': status == 'paid' ? 0 : fee - paid,
+        };
+    Map<String, Object?> pay(String id, String who, String mon,
+            {int amount = 150000, String status = 'confirmed', int? receipt, String method = 'cash', String? reference, int daysAgo = 0}) =>
+        {
+          'id': id, 'student_id': 's-$id', 'student_name': who, 'month': mon, 'amount_paise': amount, 'method': method,
+          'paid_on': dayKey(now.subtract(Duration(days: daysAgo))), 'reference': reference, 'status': status, 'receipt_no': receipt,
+          'created_at': _iso(Duration(hours: -2 - daysAgo * 24)), 'confirmed_by': status == 'confirmed' ? 'Priya' : null,
+        };
+    final names = people.take(9).toList();
+    final pastDue = now.day > 5;
+    routes['/teacher/fees'] = (_) => {
+          'month': month, 'this_month': month, 'today': today, 'upi': upi,
+          'totals': {'expected': 1200000, 'collected': 600000, 'waiting': 150000, 'left': 450000, 'students': 8, 'paid': 4, 'unpaid': 3, 'late': pastDue ? 3 : 0},
+          'students': [
+            for (final (i, n) in names.take(8).indexed)
+              {
+                'id': 's$i', 'display_name': n, 'username': 'u$i', 'class_level': 10, 'active': true,
+                ...switch (i) {
+                  0 => m(month, claimed: 150000, status: 'claimed', late: pastDue),
+                  1 => m(month, late: pastDue),
+                  2 => m(month, paid: 50000, late: pastDue),
+                  3 => m(month, late: pastDue),
+                  _ => m(month, paid: 150000, status: 'paid'),
+                },
+              },
+          ],
+          'others': <Object?>[],
+          'no_fee': [{'id': 's8', 'display_name': names[8], 'username': 'u8', 'class_level': 10}],
+          'claims': [pay('c1', names[0], month, status: 'claimed', method: 'upi', reference: '612345678901')],
+        };
+    await _both(t, 'fees-month', () => const FeesScreen(), height: 3200);
+
+    routes['/teacher/fees/students/s1'] = (_) => {
+          'student': {'id': 's1', 'display_name': names[1], 'username': 'u1', 'class_level': 10, 'active': true, 'joined': older},
+          'this_month': month, 'today': today, 'upi': upi, 'rates': [{'from_month': older, 'fee_paise': 150000, 'due_day': 5}],
+          'months': [m(month, late: pastDue), m(last, late: true), m(older, paid: 150000, status: 'paid')],
+          'payments': [pay('p3', names[1], older, receipt: 41, method: 'upi', reference: '512398765432', daysAgo: 52)],
+          'fee': 150000, 'due_day': 5, 'set': true, 'left': 300000, 'month': m(month, late: pastDue),
+          'owing': [m(last, late: true), m(month, late: pastDue)],
+        };
+    await _both(t, 'fees-student', () => const FeeStudentScreen(id: 's1'), height: 2400);
+
+    final record = {
+      'student': {'id': 's1', 'display_name': names[1], 'class_level': 10},
+      'months': [m(month, late: pastDue), m(last, late: true)], 'fee': 150000, 'this_month': month,
+    };
+    await _both(t, 'fees-record', () => RecordPaymentScreen(data: record), height: 2000);
+
+    // The receipt, and the picture it shares, saved from each theme: the two must both be light.
+    final receipt = {...pay('p9', names[1], last, receipt: 42, method: 'upi', reference: '612345678901'), 'class_level': 10};
+    await _both(t, 'fees-receipt', () => ReceiptScreen(payment: receipt), height: 2200, then: (t) async {
+      if (_shots) {
+        await t.runAsync(() async {
+          final boundary = t.renderObject<RenderRepaintBoundary>(find.descendant(of: find.byKey(ReceiptScreen.cardKey), matching: find.byType(RepaintBoundary)).first);
+          File('../tools/out/shots/fees-receipt-picture-from-${isDark ? 'dark' : 'light'}.png')
+            ..createSync(recursive: true)
+            ..writeAsBytesSync(await reportPicture(boundary));
+        });
+      }
+    });
+
+    await _both(t, 'fees-set', () => const SetFeeScreen(target: FeeTarget.group(10, 'sub-Maths', label: '10th Maths')), height: 1800, then: (t) async {
+      await t.enterText(find.byType(TextField).first, '1500');
+      await _settle(t);
+    });
+    await _both(t, 'fees-upi', () => const UpiIdScreen(), height: 1800);
+
+    // The owner's Home: a payment to confirm, and this month's fees still to come.
+    routes['/teacher/home'] = (_) => {
+          ...home(groups: [group(10, 'Maths', 12), group(9, 'Science', 9)]),
+          'fees': {'month': month, 'expected': 1200000, 'collected': 600000, 'waiting': 150000, 'left': 450000, 'students': 8, 'paid': 4, 'unpaid': 3, 'late': 2, 'claims': 1, 'no_fee': 1, 'upi': true},
+        };
+    await _both(t, 'home-fees', () => const Scaffold(body: TutorHome()), height: 2000);
+
+    // The student's own fees: last month's, late, to pay by UPI, and this month's after it.
+    _sessionAs(role: 'student', tuitions: [{'id': 't-1', 'name': 'Priya Maths Classes', 'role': 'student', 'status': 'active', 'class_level': 9}]);
+    routes['/student/fees'] = (_) => {
+          'tuition': {'id': 't-1', 'name': 'Priya Maths Classes'}, 'this_month': month, 'today': today, 'upi': upi,
+          'months': [m(month, late: pastDue), m(last, late: true)],
+          'payments': [pay('p3', 'Harini Venkatesh', older, receipt: 41, method: 'upi', daysAgo: 52)],
+          'fee': 150000, 'due_day': 5, 'set': true, 'left': 300000, 'month': m(month, late: pastDue),
+          'owing': [m(last, late: true), m(month, late: pastDue)],
+        };
+    await _both(t, 'fees-pay', () => const MyFeesScreen(), height: 3400);
   });
 
   shotTest('courses: adding people', (t) async {
@@ -2037,5 +2705,45 @@ void main() {
       await press(t, find.text('Hard').last);
       await press(t, find.text('Add all 2 shown'));
     });
+  });
+
+  // Ready-made questions (routes/ready-made.ts): a group with none of them yet is offered its book in the question picker; adding it
+  // lists them as the tuition's own, marked Ready-made.
+  shotTest('ready-made questions', (t) async {
+    _sessionAs(role: 'teacher', tuitions: tutorTuition);
+    var added = false;
+    const ready = {'book': 'NCERT Ganita Manjari, Grade 9, Parts I and II (2026-27)', 'chapters': 14, 'questions': 140};
+    Map<String, Object?> q(String id, String text, String chapter) =>
+        {'id': id, 'text': text, 'chapter': chapter, 'difficulty': 'medium', 'difficulty_by': null, 'source': 'library'};
+    const coords = 'Orienting Yourself: The Use of Coordinates';
+    const linear = 'Introduction to Linear Polynomials';
+    routes['GET /teacher/ready-made'] = (_) => {'ready': {...ready, 'added': added ? 140 : 0}};
+    routes['POST /teacher/ready-made'] = (_) {
+      added = true;
+      return {'added': 140, 'ready': {...ready, 'added': 140}};
+    };
+    routes['GET /teacher/questions'] = (_) => {
+          'questions': added
+              ? [
+                  q('r1', 'In which quadrant does the point (−4, 7) lie?', coords),
+                  q('r2', 'What is the distance between the points A(2, 3) and B(8, 11)?', coords),
+                  q('r3', 'A point lies on the y-axis, 6 units below the origin. What are its coordinates?', coords),
+                  q('r4', r'What is the degree of the polynomial $7x - 2x^3 + 5$?', linear),
+                  q('r5', 'Which of these is a linear polynomial?', linear),
+                  q('r6', r'What is the value of $5x - 3$ when $x = -2$?', linear),
+                ]
+              : <Object?>[],
+        };
+    // Each drawing starts with none added, as a tuition that has not added the book.
+    Widget picker() {
+      added = false;
+      return const QuestionPicker(classLevel: 9, subjectId: 'sub-Maths', subjectName: 'Maths', selected: []);
+    }
+
+    await _both(t, 'ready-made-offer', picker, height: 1700);
+    await _both(t, 'ready-made-added', picker, height: 1900, then: (t) async {
+      await press(t, find.text('Add 140 questions'));
+    });
+    expect(added, isTrue);
   });
 }

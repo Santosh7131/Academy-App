@@ -10,7 +10,10 @@ import { afterTestChange } from '../lib/notify.ts';
 import { deleteObjects } from '../lib/storage.ts';
 import { createWithLogin, pinOf, planLogin, tutorMadeLoginsOff } from '../lib/students.ts';
 import { memberStudents } from '../lib/tuition.ts';
+import { attendanceToday } from './attendance.ts';
+import { pageTimes } from '../lib/timetable.ts';
 import { readBody } from './body.ts';
+import { roomFor } from '../lib/plans.ts';
 
 // A course is a list of people a tutor chooses, with papers, questions and tests of its own. Mounted with the
 // teacher routes, behind requireUser('teacher'). Every tutor of the tuition sees every course of it.
@@ -77,7 +80,15 @@ courseRoutes.get('/courses/:id', async (c) => {
       limit 100`,
     [id],
   );
-  return c.json({ course: { id: course.id, name: course.name, people: people.filter((p) => p.active).length }, people, tests, library: await courseLibraryCount(T, id) });
+  return c.json({
+    course: { id: course.id, name: course.name, people: people.filter((p) => p.active).length },
+    people,
+    tests,
+    library: await courseLibraryCount(T, id),
+    attendance_today: await attendanceToday(T, { kind: 'course', courseId: id }),
+    // The course's timetable (routes/timetable.ts).
+    times: await pageTimes(T, { kind: 'course', courseId: id }),
+  });
 });
 
 /**
@@ -177,6 +188,8 @@ courseRoutes.post('/courses/:id/people/new', async (c) => {
   const plan = await planLogin(b.username, displayName, c.get('user').id, T);
   const pin = pinOf(b);
   const { result: student, username } = await createWithLogin(plan, pin, async (cx, login) => {
+    // A new student takes room on the tuition's plan (lib/plans.ts).
+    await roomFor(cx, T, 'student');
     const row = await q1(
       `insert into users (role, username, display_name, secret_hash, secret_salt) values ('student', $1, $2, $3, $4)
        returning id, username, display_name`,

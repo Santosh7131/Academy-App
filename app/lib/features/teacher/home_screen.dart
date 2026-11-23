@@ -46,7 +46,7 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
   final Set<String> _all = {};
 
   @override
-  Set<Area> get refreshAreas => {Area.tests, Area.students, Area.papers, Area.courses, Area.credit};
+  Set<Area> get refreshAreas => {Area.tests, Area.students, Area.papers, Area.courses, Area.credit, Area.fees};
 
   // Students start and hand in tests all the time: check every 30 s while this is on screen.
   @override
@@ -189,6 +189,7 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
     final pending = _n(d['pending_requests']);
     final code = '${d['tuition']?['join_code'] ?? ''}';
     final noStudents = groups.every((g) => _n(g['students']) == 0) && courses.every((c) => _n(c['people']) == 0);
+    final fees = d['fees'] is Map ? (d['fees'] as Map).cast<String, dynamic>() : const <String, dynamic>{};
     final hasClass = groups.isNotEmpty || courses.isNotEmpty;
 
     // Every test that is open now or coming up, with the class it is for, from the groups and from the courses.
@@ -255,6 +256,26 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
           chevron: true,
           onTap: () => _go(papers.length == 1 ? '/t/papers/${papers.first['id']}' : '/t/papers'),
         ),
+      // Fees, on the owner's Home: payments students say they made, and this month's fees still to come.
+      if (_n(fees['claims']) > 0)
+        RowTile(
+          leading: _badge(Ph.currencyInr),
+          title: _n(fees['claims']) == 1 ? '1 fee payment to confirm' : '${_n(fees['claims'])} fee payments to confirm',
+          meta: 'Students say they paid by UPI',
+          chevron: true,
+          onTap: () => _go('/t/fees'),
+        ),
+      if (_n(fees['unpaid']) > 0)
+        RowTile(
+          leading: _badge(Ph.currencyInr),
+          title: '${f.count(_n(fees['unpaid']), 'student')} to pay for ${DateFormat('MMMM').format(DateTime.now())}',
+          meta: [
+            '${inrWhole(_n(fees['left']))} still to come',
+            if (_n(fees['late']) > 0) '${_n(fees['late'])} late',
+          ].join(' · '),
+          chevron: true,
+          onTap: () => _go('/t/fees'),
+        ),
       if (pending == 0 && noStudents && hasClass && code.length == 6)
         RowTile(
           leading: _badge(Ph.shareNetwork),
@@ -269,7 +290,7 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
     return [
       if (_error != null) pad(InlineNotice(_error!, icon: Ph.warning), top: 16),
       // AI waits for credit when there is not enough for a page or a question; nothing else does.
-      if (c != null && c.out) pad(CreditLowNotice(c, onAdd: () => _go('/t/credit/add')), top: 18),
+      if (c != null && c.out) pad(CreditLowNotice(c, onAdd: () => _go('/t/plan')), top: 18),
       if (!hasClass)
         EmptyState(
           icon: Ph.users,

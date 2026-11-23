@@ -1,12 +1,13 @@
 // Renames the product everywhere its name is set, in one go, or checks that every copy agrees.
 //
 //   node tools/rename-product.mjs "New Name"   sets the name in both apps, both launcher labels, the API's messages,
-//                                              the website's pages and the README
+//                                              the website's pages, the web app's page and the README
 //   node tools/rename-product.mjs --check      fails (exit 1) when the copies differ; says so while the stand-in is in
 //
 // The name lives in app/lib/core/brand.dart (both apps show it, and both android/app/build.gradle.kts read their
 // launcher label from it), in its copy admin/lib/core/brand.dart (made by tools/sync-admin-ui.mjs), in
-// api/src/lib/brand.ts (the server's messages), and in the pages in website/ and README.md, where every copy of the old name is
+// api/src/lib/brand.ts (the server's messages), and in the pages in website/, the web app's app/web/index.html and
+// app/web/manifest.json, and README.md, where every copy of the old name is
 // replaced. The Android app ids are changed separately (they can never change once phones have the app).
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -16,6 +17,9 @@ const ADMIN = 'admin/lib/core/brand.dart';
 const API = 'api/src/lib/brand.ts';
 const SITE = 'website';
 const README = 'README.md'; // the repository's front page names the product too
+// The web app's page (HTML) and its manifest (JSON, where & stays as it is), shown before the app itself has loaded.
+const WEB_PAGE = 'app/web/index.html';
+const WEB_MANIFEST = 'app/web/manifest.json';
 const DART = /^const appName = '([^']+)';(\r?)$/m;
 const TS = /^export const APP_NAME = '([^']+)';(\r?)$/m;
 const STAND_IN = /^\/\/\/ STAND-IN:.*\r?\n/m;
@@ -32,6 +36,12 @@ function check() {
   for (const p of names[0][1] ? pages() : []) {
     if (!read(p).includes(html(names[0][1]))) {
       console.log(`${p}: does not mention ${names[0][1]}`);
+      same = false;
+    }
+  }
+  for (const [f, n] of [[WEB_PAGE, html(names[0][1] ?? '')], [WEB_MANIFEST, names[0][1]]]) {
+    if (names[0][1] && fs.existsSync(f) && !read(f).includes(n)) {
+      console.log(`${f}: does not mention ${names[0][1]}`);
       same = false;
     }
   }
@@ -59,8 +69,10 @@ fs.writeFileSync(APP, read(APP).replace(DART, `const appName = '${name}';$2`).re
 fs.writeFileSync(API, read(API).replace(TS, `export const APP_NAME = '${name}';$2`));
 if (old && old !== name) {
   for (const p of pages()) fs.writeFileSync(p, read(p).replaceAll(html(old), html(name)));
+  if (fs.existsSync(WEB_PAGE)) fs.writeFileSync(WEB_PAGE, read(WEB_PAGE).replaceAll(html(old), html(name)));
+  if (fs.existsSync(WEB_MANIFEST)) fs.writeFileSync(WEB_MANIFEST, read(WEB_MANIFEST).replaceAll(old, name));
   if (fs.existsSync(README)) fs.writeFileSync(README, read(README).replaceAll(old, name));
 }
 execFileSync(process.execPath, ['tools/sync-admin-ui.mjs'], { stdio: 'inherit' });
 if (!check()) process.exit(1);
-console.log(`Renamed to ${name}, website and README included. The app ids change separately.`);
+console.log(`Renamed to ${name}, website, web app and README included. The app ids change separately.`);

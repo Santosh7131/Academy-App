@@ -14,6 +14,7 @@ import '../../ui/difficulty.dart';
 import '../../ui/math_text.dart';
 import 'common.dart';
 import 'subjects.dart';
+import 'worked_solutions.dart';
 import '../../core/levels.dart';
 
 String testState(Map<String, dynamic> t) {
@@ -105,11 +106,14 @@ List<Widget> classTests(
 // ---------------------------------------------------------------- editor
 
 class TestEditor extends StatefulWidget {
-  /// [courseId] and [courseName] are for a new test of a course (an existing test says which it is itself).
-  const TestEditor({super.key, this.id, this.courseId, this.courseName});
+  /// [courseId] and [courseName] are for a new test of a course, and [classLevel] and [subjectId] for a new test of a group, chosen
+  /// before it opens (an existing test says which it is itself).
+  const TestEditor({super.key, this.id, this.courseId, this.courseName, this.classLevel, this.subjectId});
   final String? id;
   final String? courseId;
   final String? courseName;
+  final int? classLevel;
+  final String? subjectId;
 
   @override
   State<TestEditor> createState() => _TestEditorState();
@@ -149,6 +153,12 @@ class _TestEditorState extends State<TestEditor> {
     _courseId = widget.courseId;
     _courseName = widget.courseName;
     if (_isCourse) _loadCourseSize();
+    if (widget.id == null && !_isCourse && widget.classLevel != null) {
+      // A new test from a group's Make tests: its class and subject are known already.
+      _class = widget.classLevel;
+      _subjectId = widget.subjectId;
+      _loadStudents();
+    }
     _loadSubjects();
     // Every test closes: a new one starts with a closing time.
     if (widget.id == null) _closes = defaultClosing();
@@ -266,8 +276,8 @@ class _TestEditorState extends State<TestEditor> {
     return null;
   }
 
-  Future<void> _save({required bool publish}) async {
-    setState(() => _busy = true);
+  /// The test as it is on the screen, as it is saved.
+  Map<String, Object?> get _body {
     final shared = {
       'title': _title.text.trim(),
       'question_ids': [for (final q in _questions) q['id']],
@@ -277,7 +287,7 @@ class _TestEditorState extends State<TestEditor> {
       'shuffle': _shuffle,
     };
     // A course's test goes to the people of its course; a group's to its class, or to students chosen from it.
-    final body = _isCourse
+    return _isCourse
         ? {...shared, 'course_id': _courseId}
         : {
             ...shared,
@@ -287,6 +297,36 @@ class _TestEditorState extends State<TestEditor> {
             'assign_group': _audience == 'group',
             'student_ids': _audience == 'students' ? [for (final s in _group) if (_studentIds.contains(s['id'])) s['id']] : <String>[],
           };
+  }
+
+  /// Saves a draft as it is on the screen and stays on it: before it is printed, so the paper has these questions and this name,
+  /// and before AI writes worked solutions for its questions. Nobody sees a draft, so saving it changes nothing for students. False
+  /// when it could not be saved; the reason has been shown.
+  Future<bool> _saveDraft() async {
+    final missing = _missing;
+    if (missing != null) {
+      await showProblem(context, ApiException(0, 'invalid', missing));
+      return false;
+    }
+    setState(() => _busy = true);
+    try {
+      await api.patch('/teacher/tests/${widget.id}', _body);
+      return true;
+    } on ApiException catch (e) {
+      if (mounted) showProblem(context, e);
+      return false;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _print() async {
+    if (await _saveDraft() && mounted) context.push('/t/tests/${widget.id}/print');
+  }
+
+  Future<void> _save({required bool publish}) async {
+    setState(() => _busy = true);
+    final body = _body;
     try {
       final id = widget.id ?? '${(await api.post('/teacher/tests', body))['id']}';
       if (widget.id != null) await api.patch('/teacher/tests/$id', body);
@@ -474,9 +514,14 @@ class _TestEditorState extends State<TestEditor> {
             child: InlineNotice('Students have started this test, so its questions cannot change.', tone: Tone.neutral, icon: Ph.lock),
           ),
         if (_questions.isNotEmpty)
-          Center(
-            child: TextAction(_allQuestions ? 'Hide the questions' : 'See the questions', onTap: () => setState(() => _allQuestions = !_allQuestions)),
-          ),
+          Wrap(alignment: WrapAlignment.center, spacing: 22, children: [
+            TextAction(_allQuestions ? 'Hide the questions' : 'See the questions', onTap: () => setState(() => _allQuestions = !_allQuestions)),
+            // A draft prints from here, since a test for a written exam need never be posted; a posted test prints from its results.
+            if (!isNew && !_published) TextAction('Print as PDF', onTap: missing == null && !_busy ? _print : null),
+          ]),
+        // Worked solutions written by AI, for a draft's questions that have none (a posted test has them on its results).
+        if (!isNew && !_published && _questions.isNotEmpty)
+          WorkedSolutions(testId: widget.id!, questions: _questions, beforeWriting: _saveDraft, onWritten: () => setState(() {})),
         if (_allQuestions)
           for (final (i, q) in _questions.indexed) ...[
             if (i > 0) const SizedBox(height: 8),
@@ -753,6 +798,10 @@ class _QuestionPickerState extends State<QuestionPicker> {
   Difficulty? _difficulty;
   String? _error;
 
+  /// The ready-made questions this group's class and subject can add (routes/ready-made.ts): null when there are none, or for a course.
+  Map<String, dynamic>? _ready;
+  bool _adding = false;
+
   @override
   void initState() {
     super.initState();
@@ -760,16 +809,52 @@ class _QuestionPickerState extends State<QuestionPicker> {
   }
 
   Future<void> _load() async {
+    final offer = widget.courseId == null ? _loadReady() : null;
     try {
       final r = await api.get(widget.courseId != null
           ? '/teacher/questions?course=${widget.courseId}'
           : '/teacher/questions?class=${widget.classLevel}&subject=${widget.subjectId}');
-      // The ready-made library is not offered anywhere in the app.
       final all = (r['questions'] as List).cast<Map<String, dynamic>>();
-      if (mounted) setState(() => _all = [for (final x in all) if (x['source'] != 'library') x]);
+      if (mounted) setState(() => _all = all);
     } on ApiException catch (e) {
       if (mounted) setState(() => _error = e.message);
     }
+    await offer;
+  }
+
+  /// What ready-made questions the group could add. The picker works without them, so a failure only leaves the offer out.
+  Future<void> _loadReady() async {
+    try {
+      final r = await api.get('/teacher/ready-made?class=${widget.classLevel}&subject=${widget.subjectId}');
+      if (mounted) setState(() => _ready = r is Map && r['ready'] is Map ? (r['ready'] as Map).cast<String, dynamic>() : null);
+    } on ApiException {
+      if (mounted) setState(() => _ready = null);
+    }
+  }
+
+  /// Offered only while the tuition has none of the book's questions: a tutor who deleted some on purpose is not asked again.
+  Map<String, dynamic>? get _offer {
+    final r = _ready;
+    return r != null && ((r['added'] as num?)?.toInt() ?? 0) == 0 && ((r['questions'] as num?)?.toInt() ?? 0) > 0 ? r : null;
+  }
+
+  Future<void> _addReady() async {
+    if (_adding) return;
+    setState(() => _adding = true);
+    try {
+      await api.post('/teacher/ready-made', {'class_level': widget.classLevel, 'subject_id': widget.subjectId});
+      if (mounted) await _load();
+    } on ApiException catch (e) {
+      if (mounted) showProblem(context, e);
+    } finally {
+      if (mounted) setState(() => _adding = false);
+    }
+  }
+
+  /// The row's chapter, and "Ready-made" for a question from the ready-made books.
+  String? _meta(Map<String, dynamic> q) {
+    final parts = [if (q['chapter'] != null) '${q['chapter']}', if (q['source'] == 'library') 'Ready-made'];
+    return parts.isEmpty ? null : parts.join(' · ');
   }
 
   bool _has(Map<String, dynamic> q) => _picked.any((p) => p['id'] == q['id']);
@@ -847,6 +932,10 @@ class _QuestionPickerState extends State<QuestionPicker> {
             ),
           ),
         const SizedBox(height: 14),
+        if (_offer case final ready?) ...[
+          ReadyMadeOffer(ready: ready, className: widget.title, busy: _adding, onAdd: _addReady),
+          const SizedBox(height: 14),
+        ],
         if (all == null && _error != null)
           ErrorState(message: _error!, onRetry: _load)
         else if (all == null)
@@ -861,19 +950,63 @@ class _QuestionPickerState extends State<QuestionPicker> {
         else if (shown.isEmpty)
           widget.courseId != null
               ? const EmptyState(icon: Ph.books, title: 'No questions in this course yet', body: 'Upload a paper or describe a test to AI first. Its questions are kept in the course.')
-              : EmptyState(icon: Ph.books, title: 'No ${widget.title} questions', body: 'Add some in Questions or from a question paper first.')
+              : EmptyState(
+                  icon: Ph.books,
+                  title: 'No ${widget.title} questions',
+                  body: _offer != null
+                      ? 'Add the ready-made ones above, or your own in Questions or from a question paper.'
+                      : 'Add some in Questions or from a question paper first.',
+                )
         else
           for (final (i, q) in shown.indexed) ...[
             if (i > 0) const SizedBox(height: 8),
             RowTile(
               leading: Tick(on: _has(q)),
               titleWidget: MathText('${q['text']}', style: rowTitleStyle, maxLines: 3),
-              meta: q['chapter'] == null ? null : '${q['chapter']}',
+              meta: _meta(q),
               trailing: DifficultyChip(difficultyOf(q['difficulty'])),
               onTap: () => setState(() => _has(q) ? _picked.removeWhere((p) => p['id'] == q['id']) : _picked.add(q)),
             ),
           ],
       ],
+    );
+  }
+}
+
+/// The ready-made questions a group's class and subject can add (routes/ready-made.ts), with the button that adds them all.
+class ReadyMadeOffer extends StatelessWidget {
+  const ReadyMadeOffer({super.key, required this.ready, required this.className, required this.busy, required this.onAdd});
+
+  /// { book, chapters, questions, added } as the server sends it.
+  final Map<String, dynamic> ready;
+
+  /// "9th Maths".
+  final String className;
+  final bool busy;
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = (ready['questions'] as num?)?.toInt() ?? 0;
+    final chapters = (ready['chapters'] as num?)?.toInt() ?? 0;
+    final each = chapters > 0 ? ' ${(total / chapters).round()} for each of its $chapters chapters,' : '';
+    return Surface(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Row(children: [
+          Icon(Ph.books, size: 20, color: ink),
+          const SizedBox(width: 10),
+          Expanded(child: Fig('Ready-made questions', style: rowTitleStyle)),
+        ]),
+        const SizedBox(height: 6),
+        Fig(
+          '$total questions for $className,$each each with a worked solution. Written for the NCERT 2026-27 books. They become '
+          'your own questions, to change or delete.',
+          style: bodyStyle.copyWith(color: muted),
+        ),
+        const SizedBox(height: 12),
+        SecondaryButton(busy ? 'Adding…' : 'Add $total questions', icon: Ph.plus, onTap: busy ? null : onAdd),
+      ]),
     );
   }
 }
@@ -1049,6 +1182,9 @@ class _TestResultsScreenState extends State<TestResultsScreen> with WidgetsBindi
             StatSmall((sum['missed'] as int) > 0 ? 'Missed' : 'Writing now', '${(sum['missed'] as int) > 0 ? sum['missed'] : sum['writing']}'),
           ],
         ),
+        const SizedBox(height: gapRow),
+        // The test on paper, with the tuition's name and an answer key (print_test.dart).
+        SecondaryButton('Print as PDF', icon: Ph.filePdf, onTap: questions.isEmpty ? null : () => context.push('/t/tests/${widget.id}/print')),
         SectionRule('Students', count: students.length, padding: const EdgeInsets.fromLTRB(0, 26, 0, 11)),
         if (students.isEmpty) Text('No students are given this test.', style: bodyStyle.copyWith(color: muted)),
         for (final (i, s) in students.indexed) ...[
@@ -1092,6 +1228,11 @@ class _TestResultsScreenState extends State<TestResultsScreen> with WidgetsBindi
               onTap: () => setState(() => _allQuestions = !_allQuestions),
             ),
           ),
+        // Worked solutions written by AI for the questions that have none: students who handed it in see them in their review.
+        if (questions.isNotEmpty) ...[
+          SizedBox(height: questions.length > 2 ? 4 : 14),
+          WorkedSolutions(testId: widget.id, questions: questions, onWritten: _load),
+        ],
         // The settings are last: what the tutor came for is who has written it and how it went.
         SectionRule('Settings', padding: const EdgeInsets.fromLTRB(0, 26, 0, 11)),
         FactList([

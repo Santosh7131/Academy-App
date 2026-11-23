@@ -399,7 +399,7 @@ class _TestScreenState extends State<TestScreen> {
                             const SizedBox(height: 16),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(rSmall),
-                              child: Image.network(q.imageUrl!, fit: BoxFit.contain, errorBuilder: (_, _, _) => const SizedBox.shrink()),
+                              child: Image.network(q.imageUrl!, fit: BoxFit.contain, webHtmlElementStrategy: WebHtmlElementStrategy.fallback, errorBuilder: (_, _, _) => const SizedBox.shrink()),
                             ),
                           ],
                           const SizedBox(height: 26),

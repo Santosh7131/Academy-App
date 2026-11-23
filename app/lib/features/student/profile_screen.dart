@@ -6,6 +6,7 @@ import '../../theme.dart';
 import '../../ui/kit.dart';
 import '../../ui/update_card.dart';
 import '../../core/levels.dart';
+import '../../core/web_bits.dart' show savesFiles;
 import 'account_cards.dart';
 
 /// Profile for students and the teacher: who is signed in, theme, log out.
@@ -70,7 +71,7 @@ class ProfileScreen extends StatelessWidget {
               ],
               const SectionRule('Theme', padding: EdgeInsets.fromLTRB(0, 26, 0, 12)),
               SegmentedToggle(
-                labels: const ['Phone', 'Light', 'Dark'],
+                labels: [savesFiles ? 'Computer' : 'Phone', 'Light', 'Dark'],
                 index: ThemeChoice.values.indexOf(session.theme),
                 onChanged: (i) => session.setTheme(ThemeChoice.values[i]),
               ),

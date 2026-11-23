@@ -3,9 +3,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api.dart';
 import '../../core/changes.dart';
+import '../../core/credit.dart' show inrWhole;
+import '../../core/fees.dart';
 import '../../core/format.dart' as f;
 import '../../core/levels.dart';
+import '../../core/links.dart';
 import '../../core/session.dart';
+import '../../core/timetable.dart';
 import '../../theme.dart';
 import '../../ui/floating_tabs.dart';
 import '../../ui/kit.dart';
@@ -41,6 +45,20 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver, 
   String? _error;
   bool _loading = false;
 
+  /// This month's attendance, every class together (an older server sends none).
+  Map<String, dynamic>? _attendance;
+
+  /// What is owed here, once the tutor has set a fee (api/src/routes/fees.ts); null when no fee was ever set.
+  Map<String, dynamic>? _fee;
+
+  /// Today's classes from the timetable (api/src/lib/timetable.ts), by India's calendar on the server's clock, and the next class
+  /// on a later day. An older server sends neither.
+  List<ClassTime> _today = const [];
+  ClassTime? _next;
+
+  /// Said when a class's link could not be opened.
+  String? _joinProblem;
+
   @override
   Set<Area> get refreshAreas => {Area.student};
 
@@ -64,6 +82,11 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver, 
     try {
       final r = await api.get('/student/home');
       _tests = (r['tests'] as List).cast<Map<String, dynamic>>();
+      _attendance = r['attendance'] is Map ? (r['attendance'] as Map).cast<String, dynamic>() : null;
+      _fee = r['fee'] is Map ? (r['fee'] as Map).cast<String, dynamic>() : null;
+      final classes = r['classes'] is Map ? r['classes'] as Map : const {};
+      _today = ClassTime.list(classes['today']);
+      _next = ClassTime.from(classes['next']);
       // The server says how many courses the student is in (an older server says nothing: none).
       final n = (r['courses'] as num?)?.toInt() ?? 0;
       _courses = n == 0 ? const [] : ((await api.get('/student/courses'))['courses'] as List).cast<Map<String, dynamic>>();
@@ -163,11 +186,14 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver, 
                       padding: const EdgeInsets.fromLTRB(gutter, 18, gutter, 0),
                       child: InlineNotice(_error!, icon: Ph.warning),
                     ),
+                  if (tab == _Tab.home) ..._classRows(),
                   ...(tab == _Tab.library
                       ? staggered(libraryRows(_shelves, onOpen: (shelf) => _open(libraryClassPath(shelf))), scope: this, prefix: 'library', stepMs: 70)
                       : showCourses
                           ? _courseSections(withNote: tab == _Tab.courses)
                           : _sections(tests)),
+                  if (tab == _Tab.home) ..._feeRows(),
+                  if (tab == _Tab.home) ..._attendanceRows(),
                 ],
               ]),
             ),
@@ -206,6 +232,101 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver, 
         stepMs: 70,
       );
 
+  /// Today's classes from the timetable, each with Join when the tutor gave a link to join it online; on a day with none, the next
+  /// class.
+  List<Widget> _classRows() {
+    final today = _today;
+    final next = _next;
+    if (today.isEmpty && (next == null || next.day == null)) return const [];
+    return [
+      SectionRule(today.isNotEmpty ? "Today's classes" : 'Next class', count: today.length > 1 ? today.length : null),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: gutter),
+        child: Column(children: [
+          if (today.isEmpty)
+            _ClassRow(time: next!, when: '${f.shortDate(f.dayOf(next.day!))} · ${startLabel(next.startsAt)}')
+          else
+            for (final (i, t) in today.indexed) ...[
+              if (i > 0) const SizedBox(height: gapRow),
+              _ClassRow(time: t, when: startLabel(t.startsAt), onJoin: t.joinUrl == null ? null : () => _join(t.joinUrl!)),
+            ],
+          if (_joinProblem != null) ...[const SizedBox(height: 10), InlineNotice(_joinProblem!, icon: Ph.warning)],
+        ]),
+      ),
+    ];
+  }
+
+  /// Opens a class's link outside the app: the Meet, Zoom or Jitsi app, or the browser.
+  Future<void> _join(String url) async {
+    final ok = await openJoinLink(url);
+    if (mounted) setState(() => _joinProblem = ok ? null : 'The link could not be opened here. Ask your tutor to check it.');
+  }
+
+  /// The fee owed, the oldest month first, or this month's paid; a tap opens the fees, to pay by UPI.
+  List<Widget> _feeRows() {
+    final fee = _fee;
+    if (fee == null) return const [];
+    final owing = [for (final m in (fee['owing'] as List?) ?? const []) Map<String, dynamic>.from(m as Map)];
+    final unpaid = owing.where((m) => m['status'] == 'unpaid').toList();
+    final month = fee['month'] is Map ? (fee['month'] as Map).cast<String, dynamic>() : null;
+    final String title;
+    final String meta;
+    Color? color;
+    if (unpaid.isNotEmpty) {
+      final left = unpaid.fold<int>(0, (n, m) => n + paiseOf(m['left']));
+      final late = unpaid.any((m) => m['late'] == true);
+      title = '${inrWhole(left)} to pay';
+      meta = unpaid.length == 1
+          ? '${monthName('${unpaid.first['month']}')} · ${late ? 'was due' : 'due'} ${dueDay('${unpaid.first['due_on']}')}'
+          : 'For ${monthsList([for (final m in unpaid) '${m['month']}'])}';
+      if (late) color = danger;
+    } else if (owing.isNotEmpty) {
+      title = 'Waiting for your tutor';
+      meta = 'You said you paid for ${monthsList([for (final m in owing) '${m['month']}'])}';
+    } else if (month != null) {
+      title = '${monthName('${month['month']}')} is paid';
+      meta = 'Receipts are in Fees';
+      color = success;
+    } else {
+      return const [];
+    }
+    return [
+      const SectionRule('Fees'),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: gutter),
+        child: RowTile(
+          leading: Icon(Ph.currencyInr, size: 22, color: ink),
+          title: title,
+          meta: meta,
+          metaColor: color,
+          chevron: true,
+          onTap: () => _open('/s/fees'),
+        ),
+      ),
+    ];
+  }
+
+  /// This month's attendance, every class together, once a register with the student on it has been taken.
+  List<Widget> _attendanceRows() {
+    final a = _attendance;
+    final classes = (a?['classes'] as num?)?.toInt() ?? 0;
+    if (a == null || classes == 0) return const [];
+    final here = (a['present'] as num?)?.toInt() ?? 0;
+    final away = ((a['absent_days'] as List?) ?? const []).map((x) => '$x').toList();
+    final shown = away.take(3).map((x) => f.shortDate(f.dayOf(x))).join(', ');
+    return [
+      const SectionRule('Attendance this month'),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: gutter),
+        child: RowTile(
+          leading: Icon(Ph.listChecks, size: 22, color: ink),
+          title: 'Here at $here of ${f.count(classes, 'class', 'classes')}',
+          meta: away.isEmpty ? 'Not away once' : 'Away $shown${away.length > 3 ? ' and ${f.count(away.length - 3, 'more day', 'more days')}' : ''}',
+        ),
+      ),
+    ];
+  }
+
   /// The student's courses, one row each. Under a Courses tab a note says these are not the class's tests.
   List<Widget> _courseSections({required bool withNote}) {
     if (_courses.isEmpty) {
@@ -239,6 +360,25 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver, 
       stepMs: 70,
     );
   }
+}
+
+/// A class on the timetable: when, which and for how long, and Join when there is a link to join it online. Joining leaves the app
+/// for the tutor's chosen service, so the row names where it goes.
+class _ClassRow extends StatelessWidget {
+  const _ClassRow({required this.time, required this.when, this.onJoin});
+
+  final ClassTime time;
+  final String when;
+  final VoidCallback? onJoin;
+
+  @override
+  Widget build(BuildContext context) => RowTile(
+        leading: Icon(Ph.clock, size: 22, color: ink),
+        title: '$when · ${time.name ?? ''}',
+        meta: [lengthLabel(time.minutes), if (onJoin != null) 'on ${linkHost(time.joinUrl!)}', ?time.note].join(' · '),
+        trailing: onJoin == null ? null : SegChip('Join', selected: true, onTap: onJoin),
+        onTap: onJoin,
+      );
 }
 
 /// A course the student is in: its name, whether a test is open and when it closes.

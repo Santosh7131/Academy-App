@@ -40,6 +40,14 @@ export const CHECK_MODELS = list(
   geminiConfigured() ? 'gemini-3.1-flash-lite,gemini-3.5-flash-lite,qwen/qwen3.8-27b' : 'qwen/qwen3.8-27b',
 );
 
+// Worked solutions (routes/solutions.ts) are kept only when they reach the marked answer, so a weaker model costs solutions, never a
+// wrong one. Gemini Flash-Lite first when it is set up, because it knows Hindi and Tamil as gpt-oss does not; gpt-oss-120b, the best
+// solver above, behind it, and its smaller sibling when that has used its day.
+export const SOLUTION_MODELS = list(
+  process.env.GROQ_SOLUTION_MODELS,
+  geminiConfigured() ? 'gemini-3.1-flash-lite,openai/gpt-oss-120b,openai/gpt-oss-20b' : 'openai/gpt-oss-120b,openai/gpt-oss-20b',
+);
+
 // A question the solver and the checker split over, or only one of them could be heard on, is put to a stronger model and marked when
 // the opinions add up. Gemini 3.5 Flash was the best checker we tried (it never disputed a right answer), but its free plan allows only
 // 20 requests a day; 3.6 Flash allows 5 a minute, and Qwen is the last stand-in. With none of them left the tutor decides.

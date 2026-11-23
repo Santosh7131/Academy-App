@@ -74,4 +74,31 @@ Set-Content -Encoding utf8 (Join-Path $res 'values\ic_launcher_background.xml') 
 '@
 $bgFile = Join-Path $res 'values\ic_launcher_background.xml'
 (Get-Content -Raw $bgFile).Replace('BACKGROUND', $(if ($App -eq 'admin') { '#FAFAFB' } else { '#0E0E11' })) | Set-Content -Encoding utf8 -NoNewline $bgFile
+# The web version's icons (app/web): the same picture for a browser tab and a home-screen shortcut. The "maskable" ones fill the
+# whole square with the background, for phones that cut their own shape; Apple's is square too (iOS rounds it). The foreground is
+# drawn for Android's 108dp layer, of which only the middle 72dp shows, so it is zoomed to give the tick the same size.
+function Filled([string]$dst, [int]$size, [double]$zoom) {
+  $img = [System.Drawing.Image]::FromFile($fore)
+  $bmp = New-Object System.Drawing.Bitmap $size, $size
+  $g = [System.Drawing.Graphics]::FromImage($bmp)
+  $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+  $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+  $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
+  $g.Clear([System.Drawing.ColorTranslator]::FromHtml('#0E0E11'))
+  $s = $size * $zoom
+  $g.DrawImage($img, [float](($size - $s) / 2), [float](($size - $s) / 2), [float]$s, [float]$s)
+  $g.Dispose(); $img.Dispose()
+  $bmp.Save($dst, [System.Drawing.Imaging.ImageFormat]::Png)
+  $bmp.Dispose()
+}
+if ($App -eq 'app') {
+  $web = Join-Path $root 'app\web'
+  New-Item -ItemType Directory -Force (Join-Path $web 'icons') | Out-Null
+  Scale $legacy (Join-Path $web 'favicon.png') 64
+  Scale $legacy (Join-Path $web 'icons\Icon-192.png') 192
+  Scale $legacy (Join-Path $web 'icons\Icon-512.png') 512
+  Filled (Join-Path $web 'icons\Icon-maskable-192.png') 192 1.11
+  Filled (Join-Path $web 'icons\Icon-maskable-512.png') 512 1.11
+  Filled (Join-Path $web 'icons\Icon-apple-180.png') 180 1.29
+}
 'icon resources written'

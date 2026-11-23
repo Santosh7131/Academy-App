@@ -11,6 +11,7 @@
 import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
+import { addMonths, thisMonth } from '../api/src/lib/fees.ts';
 
 const args = process.argv.slice(2);
 const envFile = args.includes('--env') ? args[args.indexOf('--env') + 1] : '.env.local';
@@ -94,6 +95,9 @@ type World = {
   section: string; file: string;
   /** A request to join the group through its link, waiting for a tutor (a row only). */
   linkRequest: string;
+  payment: string; claim: string;
+  /** A time on the course's timetable, with a link to join it (routes/timetable.ts). */
+  classTime: string;
 };
 
 async function makeWorld(suffix: string): Promise<World> {
@@ -140,11 +144,21 @@ async function makeWorld(suffix: string): Promise<World> {
     'insert into join_requests (tuition_id, student_id, group_id) values ($1, $2, $3) returning id',
     [mk.body.tuition.id, st.body.student.id, group.rows[0].id],
   );
+  // Fees: the owner's UPI id, a fee for the student, a payment the owner recorded, and next month's, which the student says they paid.
+  await api('PUT', '/teacher/fees/upi', T, { upi_id: `sec${suffix}@examplebank` });
+  await api('PUT', '/teacher/fees/rates', T, { fee_paise: 100000, due_day: 5, student_ids: [st.body.student.id] });
+  const fp = await api('POST', '/teacher/fees/payments', T, { student_id: st.body.student.id, month: thisMonth(), amount_paise: 100000, method: 'cash' });
+  const fc = await api('POST', '/student/fees/paid', S, { month: addMonths(thisMonth(), 1) });
+  if (fp.status !== 201 || fc.status !== 201) throw new Error(`fees of ${suffix} failed: ${JSON.stringify([fp.body, fc.body])}`);
+  // The timetable: a time for the course, with a link to join it.
+  const ct = await api('POST', '/teacher/class-times', T, { course_id: co.body.course.id, weekdays: [1, 3], starts_at: '16:30', minutes: 60, join_url: `https://meet.example.com/${tag}-${suffix}` });
+  if (ct.status !== 201) throw new Error(`class time of ${suffix} failed: ${JSON.stringify(ct.body)}`);
   return {
     tuition: mk.body.tuition.id, tutorId: su.body.user.id, T, studentId: st.body.student.id, studentName: `${tag}.p${suffix}`, S,
     question: q.body.id, test: t.body.id, course: co.body.course.id, paper: pa.body.paper.id, draft: dr.rows[0].id, subject: sj.body.subject.id,
     chapter: ch.body.chapter.id, attempt: started.body.attempt.id, level: String(lv.body.level.code),
     section: sec.rows[0].id, file: fil.rows[0].id, linkRequest: jr.rows[0].id,
+    payment: fp.body.payment.id, claim: fc.body.payment.id, classTime: ct.body.time.id,
   };
 }
 
@@ -167,9 +181,12 @@ async function fingerprint(w: World) {
        union all select 'g:' || id || class_level || subject_id from groups where tuition_id = $2
        union all select 'cs:' || id || name || position from class_sections where tuition_id = $2
        union all select 'cf:' || id || section_id || name || status || position || coalesce(announced_at::text, '') from class_files where tuition_id = $2
-       union all select 'tu:' || name || join_code || join_open from tuitions where id = $2
+       union all select 'tu:' || name || join_code || join_open || coalesce(upi_id, '') || coalesce(upi_name, '') || fee_receipt_no from tuitions where id = $2
+       union all select 'fr:' || student_id || from_month || fee_paise || due_day from fee_rates where tuition_id = $2
+       union all select 'fp:' || id || status || amount_paise || coalesce(receipt_no::text, '') || month from fee_payments where tuition_id = $2
        union all select 'jl:' || code || coalesce(group_id::text, '') || coalesce(course_id::text, '') from join_links where tuition_id = $2
        union all select 'jr:' || id || student_id from join_requests where tuition_id = $2
+       union all select 'ct:' || id || weekdays::text || starts_at || minutes || coalesce(join_url, '') || coalesce(note, '') from class_times where tuition_id = $2
        union all select 'se:' || token_hash from sessions where user_id = any($1::uuid[])
      ) z`,
     [[w.tutorId, w.studentId], w.tuition],
@@ -262,7 +279,27 @@ try {
     'DELETE /teacher/tests/:id': { who: 'tutor', method: 'DELETE', path: `/teacher/tests/${A.test}?with_results=1` },
     'GET /teacher/tests/:id/results': { who: 'tutor', method: 'GET', path: `/teacher/tests/${A.test}/results` },
     'POST /teacher/tests/:id/retake': { who: 'tutor', method: 'POST', path: `/teacher/tests/${A.test}/retake`, body: { student_id: A.studentId } },
+    // Worked solutions written by AI (routes/solutions.ts): another tuition's test is not found, before any AI or credit is used.
+    'POST /teacher/tests/:id/solutions': { who: 'tutor', method: 'POST', path: `/teacher/tests/${A.test}/solutions`, body: { question_ids: [A.question] } },
+    'GET /teacher/attendance': { who: 'tutor', method: 'GET', path: `/teacher/attendance?course_id=${A.course}` },
+    'PUT /teacher/attendance': { who: 'tutor', method: 'PUT', path: '/teacher/attendance', body: { course_id: A.course, absent: [] } },
+    'DELETE /teacher/attendance': { who: 'tutor', method: 'DELETE', path: `/teacher/attendance?course_id=${A.course}` },
+    'GET /teacher/attendance/month': { who: 'tutor', method: 'GET', path: `/teacher/attendance/month?course_id=${A.course}` },
     'GET /teacher/attempts/:id': { who: 'tutor', method: 'GET', path: `/teacher/attempts/${A.attempt}` },
+    // The timetable (routes/timetable.ts): the other tuition's course and its times are not there.
+    'GET /teacher/class-times': { who: 'tutor', method: 'GET', path: `/teacher/class-times?course_id=${A.course}` },
+    'POST /teacher/class-times': { who: 'tutor', method: 'POST', path: '/teacher/class-times', body: { course_id: A.course, weekdays: [1], starts_at: '10:00', minutes: 30 } },
+    'PUT /teacher/class-times/:id': { who: 'tutor', method: 'PUT', path: `/teacher/class-times/${A.classTime}`, body: { weekdays: [1], starts_at: '10:00', minutes: 30, join_url: 'https://hijack.example.com/x' } },
+    'DELETE /teacher/class-times/:id': { who: 'tutor', method: 'DELETE', path: `/teacher/class-times/${A.classTime}` },
+    'GET /teacher/ready-made': { who: 'tutor', method: 'GET', path: `/teacher/ready-made?class=9&subject=${A.subject}` },
+    'POST /teacher/ready-made': { who: 'tutor', method: 'POST', path: '/teacher/ready-made', body: { class_level: 9, subject_id: A.subject } },
+    // Fees (routes/fees.ts): the other tuition's student, payment and "I have paid" are not there, and its students take no fee here.
+    'GET /teacher/fees/students/:id': { who: 'tutor', method: 'GET', path: `/teacher/fees/students/${A.studentId}` },
+    'PUT /teacher/fees/rates': { who: 'tutor', method: 'PUT', path: '/teacher/fees/rates', body: { fee_paise: 100, due_day: 1, student_ids: [A.studentId] } },
+    'POST /teacher/fees/payments': { who: 'tutor', method: 'POST', path: '/teacher/fees/payments', body: { student_id: A.studentId, month: thisMonth(), amount_paise: 100, method: 'cash' } },
+    'POST /teacher/fees/payments/:id/confirm': { who: 'tutor', method: 'POST', path: `/teacher/fees/payments/${A.claim}/confirm` },
+    'DELETE /teacher/fees/payments/:id': { who: 'tutor', method: 'DELETE', path: `/teacher/fees/payments/${A.payment}` },
+    'DELETE /student/fees/claims/:id': { who: 'student', method: 'DELETE', path: `/student/fees/claims/${A.claim}` },
     'POST /teacher/join-requests/:id/accept': { who: 'tutor', method: 'POST', path: `/teacher/join-requests/${A.studentId}/accept`, body: { class_level: 9 } },
     'POST /teacher/join-requests/:id/decline': { who: 'tutor', method: 'POST', path: `/teacher/join-requests/${A.studentId}/decline`, body: {} },
     'PATCH /teacher/levels/:code': { who: 'tutor', method: 'PATCH', path: `/teacher/levels/${A.level}`, body: { label: 'Hijack' } },
@@ -297,6 +334,12 @@ try {
     'POST /admin/clients/:id/credit': { who: 'tutor', method: 'POST', path: `/admin/clients/${A.tuition}/credit`, body: { amount_paise: 10000 } },
     'POST /admin/credit/requests/:id/receive': { who: 'tutor', method: 'POST', path: `/admin/credit/requests/${UUID0}/receive`, body: {} },
     'POST /admin/credit/requests/:id/decline': { who: 'tutor', method: 'POST', path: `/admin/credit/requests/${UUID0}/decline`, body: {} },
+    // Plans: only the developer gives or ends one, or decides a payment (routes/plans.ts).
+    'POST /admin/plans/requests/:id/receive': { who: 'tutor', method: 'POST', path: `/admin/plans/requests/${UUID0}/receive`, body: {} },
+    'POST /admin/plans/requests/:id/decline': { who: 'tutor', method: 'POST', path: `/admin/plans/requests/${UUID0}/decline`, body: {} },
+    'GET /admin/clients/:id/plan': { who: 'tutor', method: 'GET', path: `/admin/clients/${A.tuition}/plan` },
+    'POST /admin/clients/:id/plan': { who: 'tutor', method: 'POST', path: `/admin/clients/${A.tuition}/plan`, body: { plan: 'pro', months: 12, amount_paise: 0 } },
+    'DELETE /admin/clients/:id/plan': { who: 'tutor', method: 'DELETE', path: `/admin/clients/${A.tuition}/plan` },
     'POST /teacher/tests/:id/close': { who: 'tutor', method: 'POST', path: `/teacher/tests/${A.test}/close`, body: {} },
     'POST /teacher/tests/:id/remind': { who: 'tutor', method: 'POST', path: `/teacher/tests/${A.test}/remind`, body: {} },
     'POST /teacher/drafts/:id/unjoin': { who: 'tutor', method: 'POST', path: `/teacher/drafts/${A.draft}/unjoin`, body: {} },
@@ -343,7 +386,7 @@ try {
     // A level or group is named by its number inside the caller's own tuition, and a delete of something already gone says ok:
     // those may answer 2xx, and the fingerprint below proves they touched nothing of the first tuition.
     const ownNamespace = ['PATCH /teacher/levels/:code', 'DELETE /teacher/levels/:code', 'DELETE /teacher/chapters/:id', 'DELETE /teacher/groups/:cls/:subject'].includes(key);
-    const expected = key.startsWith('GET /admin') || key.startsWith('POST /admin') ? res.status === 403 : ownNamespace ? res.status < 500 : refused;
+    const expected = key.includes(' /admin/') ? res.status === 403 : ownNamespace ? res.status < 500 : refused;
     check(`${key}: the other tuition gets nothing`, expected, res);
   }
   // Telling students about a file takes ids but no id in its path, so it is not in the table: the other tuition's ids must reach nobody.

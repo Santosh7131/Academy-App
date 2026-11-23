@@ -34,6 +34,7 @@ const FIELD_NAMES: Record<string, string> = {
   amount_paise: 'Amount',
   page_paise: 'The price of a page',
   question_paise: 'The price of a question',
+  solution_paise: 'The price of a worked solution',
   start_paise: 'The free credit to start',
   new_clients_ai: '"New clients can use AI"',
   upi_name: 'Name',

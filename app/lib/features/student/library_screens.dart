@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -6,6 +7,7 @@ import '../../core/changes.dart';
 import '../../core/format.dart' as f;
 import '../../core/levels.dart';
 import '../../core/library.dart';
+import '../../core/web_bits.dart';
 import '../../theme.dart';
 import '../../ui/kit.dart';
 import '../library/file_viewer.dart';
@@ -125,11 +127,32 @@ class _LibraryClassScreenState extends State<LibraryClassScreen> with WidgetsBin
     }
   }
 
-  void _open(LibSection s, LibFile file) =>
-      context.push('/library/file', extra: FileViewerArgs(file, where: '${_shelf?.title ?? widget.name} · ${s.name}', teacher: false));
+  void _open(LibSection s, LibFile file) {
+    if (kIsWeb) {
+      _openInBrowser(file);
+      return;
+    }
+    context.push('/library/file', extra: FileViewerArgs(file, where: '${_shelf?.title ?? widget.name} · ${s.name}', teacher: false));
+  }
+
+  /// In a browser a file opens in a tab of its own, which shows it and saves it; the tab opens at the tap, before the link comes.
+  Future<void> _openInBrowser(LibFile file) async {
+    final tab = openPendingTab();
+    try {
+      await LibraryEnv.store.openInBrowser(file, teacher: false, tab: tab);
+    } on ApiException catch (e) {
+      if (mounted) {
+        setState(() {
+          _notice = e.message;
+          _noticeBad = true;
+        });
+      }
+    }
+  }
 
   /// Saves a copy in the phone's Downloads, fetching the file first when it is not on the phone yet.
   Future<void> _download(LibFile file) async {
+    if (kIsWeb) return _openInBrowser(file);
     if (_downloading.containsKey(file.id)) return;
     setState(() {
       _downloading[file.id] = 0;

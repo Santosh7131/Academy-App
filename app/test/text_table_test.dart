@@ -3,6 +3,7 @@
 //   flutter test test/text_table_test.dart
 import 'package:tuition_app/ui/math_text.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_math_fork/flutter_math.dart' show Math;
 import 'package:flutter_test/flutter_test.dart';
 
 /// The four shapes found in live questions (2026-11-15): with and without the outer marks, a line of dashes with colons, formulas in
@@ -73,6 +74,17 @@ void main() {
       expect(previewOf(_withMarks), startsWith('The following table shows'), reason: 'a table question keeps its order, its table run into the line');
     });
 
+    test('a case-study question comes apart into its passage and its question, for a printed test to set the passage once', () {
+      const passage = "Johan and Jayant are very close friends. They decided to go to Ranikhet with their families in separate cars. Johan's car "
+          'travels at a speed of \$x\$ km/hr while Jayant\'s car travels 5 km/hr faster than Johan\'s car.';
+      final p = passageOf('CASE STUDY 1: TEST SCORES\n\n$passage\n\nHow fast is Jayant?');
+      expect(p?.passage, 'CASE STUDY 1: TEST SCORES\n\n$passage');
+      expect(p?.question, 'How fast is Jayant?');
+      expect(passageOf('A short line.\n\nThe question'), isNull, reason: 'a short first paragraph is no passage');
+      expect(passageOf('One line\nand the next'), isNull);
+      expect(passageOf(_withMarks), isNull, reason: 'nor is a table');
+    });
+
     test('text with no table comes back as it was, | marks and all', () {
       expect(splitTables('Find |x| if x = -3'), ['Find |x| if x = -3']);
       expect(splitTables(r'If $|x - 2| = 5$, then x is'), [r'If $|x - 2| = 5$, then x is']);
@@ -132,6 +144,13 @@ void main() {
       await _show(t, r'What is $\frac{2}{5} + \frac{1}{5}$?');
       expect(find.byType(Table), findsNothing);
       expect(find.byType(Column), findsNothing);
+    });
+
+    testWidgets(r'maths written between $$ and $$ is drawn as maths, with no dollar signs left showing', (t) async {
+      await _show(t, r'Solve: $$x^2 - 5x + 6 = 0$$ and give both roots, or $x = 2$.');
+      final text = t.widget<RichText>(find.byType(RichText).first).text.toPlainText();
+      expect(text.contains(r'$'), isFalse, reason: text);
+      expect(find.byType(Math), findsNWidgets(2));
     });
   });
 }

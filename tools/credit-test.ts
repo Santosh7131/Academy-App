@@ -106,7 +106,7 @@ async function newTutor(suffix: string) {
   const mk = await api('POST', '/auth/tuitions', T, { name: `${tag} ${suffix}`, groups: [{ class_level: 9, subject_id: MATHS }] });
   if (mk.status !== 201) throw new Error(`tuition failed: ${JSON.stringify(mk.body)}`);
   created.tuitions.push(mk.body.tuition.id);
-  return { T, tuition: mk.body.tuition.id as string };
+  return { T, tuition: mk.body.tuition.id as string, user: su.body.user.id as string };
 }
 
 /** A paper of `pages` pages, each uploaded to storage as a picture of its own. Returns its id and the upload addresses. */
@@ -240,7 +240,19 @@ try {
   check('a junk time is refused', (await api('GET', '/teacher/credit/history?before=abc', A.T)).status === 400);
 
   // ---------------------------------------------------------------- adding credit
-  const closed = await api('POST', '/teacher/credit/requests', A.T, { amount_paise: 25000 });
+  // Credit is no longer sold on its own: AI comes with the plans (Santosh, 24 Nov 2026: "Upgrade only"; tools/plans-test.ts). The
+  // app's "I have paid" for credit is refused. The requests below are made as the app before plans made them (askForCredit stays in
+  // lib/credit.ts for the day top-ups come back), so the developer's side of them is still checked.
+  const { askForCredit, requestOut } = await import('../api/src/lib/credit.ts');
+  const ask = (amount: number) =>
+    askForCredit(A.tuition, A.user, amount).then(
+      (r) => ({ status: 201, body: { request: requestOut(r) } as any }),
+      (e) => ({ status: (e.status as number) ?? 500, body: { error: { code: e.code, message: e.message } } as any }),
+    );
+  const refused = await api('POST', '/teacher/credit/requests', A.T, { amount_paise: 25000 });
+  check('the app\'s "I have paid" for credit is refused: AI comes with the plans', refused.status === 409 && code(refused) === 'plans_only', refused.body);
+  check('the credit screen says credit is not sold on its own', (await api('GET', '/teacher/credit', A.T)).body?.topups === false);
+  const closed = await ask(25000);
   check('"I have paid" is refused while paying is closed', closed.status === 409 && code(closed) === 'no_upi', closed.body);
   const badUpi = await api('PUT', '/admin/credit/settings', DEV, { upi_id: 'not a upi id' });
   check('a UPI id that is not one is refused', badUpi.status === 400, badUpi.body);
@@ -255,11 +267,11 @@ try {
   check('the code stays the same', (await api('GET', '/teacher/credit', A.T)).body.pay.code === pay.code);
   check('the amounts on offer are ₹100 to ₹1,000', JSON.stringify(pay.amounts_paise) === '[10000,25000,50000,100000]', pay.amounts_paise);
   for (const amount of [25050, 1000, 2_000_000, -100]) {
-    const r = await api('POST', '/teacher/credit/requests', A.T, { amount_paise: amount });
+    const r = await ask(amount);
     check(`an amount of ${amount} paise is refused`, r.status === 400, r.body);
   }
   const before = await balance(A.tuition);
-  const asked = await api('POST', '/teacher/credit/requests', A.T, { amount_paise: 25000 });
+  const asked = await ask(25000);
   check('"I have paid ₹250" waits to be checked', asked.status === 201 && asked.body.request.status === 'waiting' && asked.body.request.code === pay.code && asked.body.request.upi_id === 'tuitionpay@okbank', asked.body);
   check('the credit is not added before it is checked', (await balance(A.tuition)) === before);
   check('the tutor sees it waiting', (await api('GET', '/teacher/credit', A.T)).body.waiting?.some((w: any) => w.id === asked.body.request.id));
@@ -277,13 +289,13 @@ try {
   check('and cannot be declined after', (await api('POST', `/admin/credit/requests/${asked.body.request.id}/decline`, DEV, {})).status === 409);
   check('a request that is not there is not found', (await api('POST', '/admin/credit/requests/00000000-0000-4000-8000-0000000000dd/receive', DEV, {})).status === 404);
 
-  const no = await api('POST', '/teacher/credit/requests', A.T, { amount_paise: 10000 });
+  const no = await ask(10000);
   const declined = await api('POST', `/admin/credit/requests/${no.body.request.id}/decline`, DEV, {});
   check('a declined request adds nothing', declined.status === 200 && declined.body.request.status === 'declined' && (await balance(A.tuition)) === before + 25000, declined.body);
 
   const waitingIds: string[] = [];
-  for (let i = 0; i < 5; i++) waitingIds.push((await api('POST', '/teacher/credit/requests', A.T, { amount_paise: 10000 })).body.request.id);
-  const sixth = await api('POST', '/teacher/credit/requests', A.T, { amount_paise: 10000 });
+  for (let i = 0; i < 5; i++) waitingIds.push((await ask(10000)).body.request.id);
+  const sixth = await ask(10000);
   check('five requests may wait at once, not six', sixth.status === 409 && code(sixth) === 'too_many_requests', sixth.body);
   for (const id of waitingIds) await api('POST', `/admin/credit/requests/${id}/decline`, DEV, {});
 

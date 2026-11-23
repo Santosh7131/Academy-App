@@ -17,11 +17,16 @@ dependencies:
   go_router: ^18.0.2
   google_sign_in: 7.2.0
   http: ^1.6.0
+  # The browser's own interfaces, for the web build only (lib/core/web_bits_web.dart).
+  web: ^1.1.1
+  # Turns each page of a printed test into a JPEG for its PDF (it came in with pdf; named here because the app uses it).
+  image: ^4.13.1
   image_picker: ^1.2.3
   intl: ^0.20.3
   path_provider: ^2.1.5
+  pdf: ^3.13.1
   pdfx: ^2.11.0
-  qr: 4.0.1
+  qr: ^3.0.2
   share_plus: ^13.3.1
   shared_preferences: ^2.5.5
 

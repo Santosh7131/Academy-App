@@ -57,6 +57,20 @@ Future<void> _open(WidgetTester t, {TestTarget? target, List<TestTarget> targets
         return Scaffold(body: Center(child: TextButton(onPressed: () => c.pop(), child: const Text('chat page'))));
       },
     ),
+    GoRoute(
+      path: '/t/tests/new',
+      builder: (c, s) {
+        _at = s.uri.toString();
+        return Scaffold(
+          body: Center(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              TextButton(onPressed: () => c.pop(), child: const Text('new test')),
+              TextButton(onPressed: () => c.pop(true), child: const Text('post it')),
+            ]),
+          ),
+        );
+      },
+    ),
   ]);
   await t.pumpWidget(MaterialApp.router(theme: buildTheme(Brightness.light), routerConfig: router));
   await _pump(t, 200);
@@ -1137,6 +1151,18 @@ void main() {
       await _tap(t, find.text('Next'));
       await _tap(t, find.text('No paper? Let AI write a test'));
       expect(_at, '/t/groups/10/sub-Maths/chat?name=Maths');
+    });
+
+    testWidgets('no paper: a test from questions the tuition has opens the editor for the chosen group', (t) async {
+      await _open(t, targets: targets);
+      await _tap(t, find.text('Next'));
+      await _tap(t, find.text('Or choose questions you have'));
+      expect(_at, '/t/tests/new?class=10&subject=sub-Maths');
+      await _tap(t, find.text('new test'));
+      expect(find.text('Or choose questions you have'), findsOneWidget, reason: 'back from the editor without a test, Make tests stays');
+      await _tap(t, find.text('Or choose questions you have'));
+      await _tap(t, find.text('post it'));
+      expect(find.text('open make'), findsOneWidget, reason: 'once the test is saved, Make tests closes too');
     });
   });
 }

@@ -2,6 +2,7 @@ import { createHash, randomInt } from 'node:crypto';
 import { pool, q, q1, tx, type Db } from './db.ts';
 import { aiConfigured } from './groq.ts';
 import { HttpError, notFound } from './http.ts';
+import { noCreditFor, refillPlanCredit, refreshPlanCredit } from './plans.ts';
 
 /**
  * AI credit: each tuition's balance for AI work (api/migrations/033_ai_credit.sql). A route that starts AI work sets its price aside
@@ -21,10 +22,15 @@ const MAX_WAITING = 5;
 /** The most the developer may add by hand in one go: ₹1,00,000. */
 export const MAX_BY_HAND = 10000000;
 
-export type CreditSettings = { pagePaise: number; questionPaise: number; startPaise: number; newClientsAi: boolean; upiId: string; upiName: string };
+export type CreditSettings = {
+  pagePaise: number; questionPaise: number; solutionPaise: number; startPaise: number; newClientsAi: boolean; upiId: string; upiName: string;
+};
 
-/** What a database with no credit settings uses: ₹2.40 a page, ₹0.60 a question, ₹20 to start. The migration writes the same. */
-const DEFAULTS: CreditSettings = { pagePaise: 240, questionPaise: 60, startPaise: 2000, newClientsAi: true, upiId: '', upiName: '' };
+/**
+ * What a database with no credit settings uses: ₹2.40 a page, ₹0.60 a question, ₹0.40 a worked solution, ₹20 to start. The
+ * migrations write the same (033, and 037 for the worked solution).
+ */
+const DEFAULTS: CreditSettings = { pagePaise: 240, questionPaise: 60, solutionPaise: 40, startPaise: 2000, newClientsAi: true, upiId: '', upiName: '' };
 
 /** The prices and the rest, from app_settings (the admin app changes them), with the default for any key that is missing. */
 export async function creditSettings(db: Db = pool): Promise<CreditSettings> {
@@ -41,6 +47,7 @@ export async function creditSettings(db: Db = pool): Promise<CreditSettings> {
   return {
     pagePaise: paise('credit_page_paise', DEFAULTS.pagePaise),
     questionPaise: paise('credit_question_paise', DEFAULTS.questionPaise),
+    solutionPaise: paise('credit_solution_paise', DEFAULTS.solutionPaise),
     startPaise: paise('credit_start_paise', DEFAULTS.startPaise),
     newClientsAi: v.has('credit_new_clients_ai') ? v.get('credit_new_clients_ai') === true : DEFAULTS.newClientsAi,
     upiId: text('credit_upi_id'),
@@ -51,40 +58,39 @@ export async function creditSettings(db: Db = pool): Promise<CreditSettings> {
 /** "₹1,250.00": an amount as a message says it. */
 export const inr = (paise: number) => `₹${(paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-/** The answer when the credit left does not cover the work: it carries what is free to spend and what the work needs, so the app can show both. */
-export function noCredit(freePaise: number, neededPaise: number) {
-  const free = Math.max(freePaise, 0);
-  return new HttpError(402, 'no_credit', `This needs ${inr(neededPaise)} of AI credit and you have ${inr(free)}. Add credit to carry on.`, {
-    credit_paise: free,
-    needed_paise: neededPaise,
-  });
-}
-
 /** Credit set aside for one job, and the prices it was set aside at: the job is charged at these, whatever changes meanwhile. */
-export type Hold = { id: string | null; pagePaise: number; questionPaise: number };
+export type Hold = { id: string | null; pagePaise: number; questionPaise: number; solutionPaise: number };
 
 const heldSql = `coalesce((select sum(h.amount_paise) from credit_holds h where h.tuition_id = t.id and h.created_at > now() - interval '${HOLD_MINUTES} minutes'), 0)::int`;
 
 /**
- * Sets the price of AI work aside before it starts: `pages` pages read and `questions` questions written. Throws 402 no_credit when
- * the credit left, less what jobs under way have set aside, does not cover it. Runs in `db` (a transaction the caller holds) or in
- * one of its own. AI that is not set up at all says so first: a tutor is never told to add credit for AI the server does not have.
+ * Sets the price of AI work aside before it starts: `pages` pages read, `questions` questions written and `solutions` worked
+ * solutions written. Throws 402 no_credit when the credit left, less what jobs under way have set aside, does not cover it. Runs in
+ * `db` (a transaction the caller holds) or in one of its own. AI that is not set up at all says so first: a tutor is never told to
+ * add credit for AI the server does not have.
  */
-export async function hold(T: string, work: { pages?: number; questions?: number }, db?: Db): Promise<Hold> {
+export async function hold(T: string, work: { pages?: number; questions?: number; solutions?: number }, db?: Db): Promise<Hold> {
   if (!aiConfigured()) throw new HttpError(503, 'ai_not_configured', 'AI is not set up on the server yet.');
+  // A plan's AI for this month goes in first (lib/plans.ts), so the work is weighed against it. On its own, it stays in even when
+  // the work then needs more than there is; in the caller's transaction, `run` gives it.
+  if (!db) await refreshPlanCredit(T);
   const run = async (cx: Db): Promise<Hold> => {
     const s = await creditSettings(cx);
-    const amount = (work.pages ?? 0) * s.pagePaise + (work.questions ?? 0) * s.questionPaise;
-    // The tuition's row is locked, so two jobs starting at once are set aside one after the other.
-    const t = await q1<{ credit_paise: number }>('select credit_paise from tuitions where id = $1 for update', [T], cx);
+    const amount = (work.pages ?? 0) * s.pagePaise + (work.questions ?? 0) * s.questionPaise + (work.solutions ?? 0) * s.solutionPaise;
+    const prices = { pagePaise: s.pagePaise, questionPaise: s.questionPaise, solutionPaise: s.solutionPaise };
+    // Both lock the tuition's row, so two jobs starting at once are set aside one after the other. Every lock taken on it for credit
+    // is "for no key update", which does not wait on a transaction that only saved a row pointing at the tuition (a paper, a line):
+    // two jobs that each saved what they made and then charged for it used to wait on each other until one was killed.
+    await refillPlanCredit(cx, T);
+    const t = await q1<{ credit_paise: number }>('select credit_paise from tuitions where id = $1 for no key update', [T], cx);
     if (!t) throw notFound('This tuition');
     await cx.query(`delete from credit_holds where tuition_id = $1 and created_at <= now() - interval '${HOLD_MINUTES} minutes'`, [T]);
     const held = (await q1<{ n: number }>('select coalesce(sum(amount_paise), 0)::int as n from credit_holds where tuition_id = $1', [T], cx))!.n;
-    if (t.credit_paise - held < amount) throw noCredit(t.credit_paise - held, amount);
+    if (t.credit_paise - held < amount) throw await noCreditFor(T, t.credit_paise - held, amount, cx);
     // Work that costs nothing (a price of ₹0) needs nothing set aside.
-    if (amount === 0) return { id: null, pagePaise: s.pagePaise, questionPaise: s.questionPaise };
+    if (amount === 0) return { id: null, ...prices };
     const row = await q1<{ id: string }>('insert into credit_holds (tuition_id, amount_paise) values ($1, $2) returning id', [T, amount], cx);
-    return { id: row!.id, pagePaise: s.pagePaise, questionPaise: s.questionPaise };
+    return { id: row!.id, ...prices };
   };
   return db ? run(db) : tx(run);
 }
@@ -110,7 +116,7 @@ export const pictureOf = (bytes: Uint8Array) => createHash('sha256').update(byte
  */
 export async function chargePage(cx: Db, T: string, h: Hold | null, page: { paperId: string; pageNo: number; picture: string }): Promise<number | null> {
   const price = h ? h.pagePaise : (await creditSettings(cx)).pagePaise;
-  const t = await q1<{ credit_paise: number }>('select credit_paise from tuitions where id = $1 for update', [T], cx);
+  const t = await q1<{ credit_paise: number }>('select credit_paise from tuitions where id = $1 for no key update', [T], cx);
   if (!t) return null;
   // Never below zero: credit set aside covers the price, and a hold that ran out (a job past HOLD_MINUTES) takes what is left.
   const amount = Math.min(price, t.credit_paise);
@@ -133,7 +139,7 @@ export async function chargePage(cx: Db, T: string, h: Hold | null, page: { pape
 export async function chargeQuestions(cx: Db, T: string, h: Hold | null, work: { paperId: string; count: number; label: string }): Promise<number | null> {
   if (work.count <= 0) return null;
   const price = h ? h.questionPaise : (await creditSettings(cx)).questionPaise;
-  const t = await q1<{ credit_paise: number }>('select credit_paise from tuitions where id = $1 for update', [T], cx);
+  const t = await q1<{ credit_paise: number }>('select credit_paise from tuitions where id = $1 for no key update', [T], cx);
   if (!t) return null;
   const amount = Math.min(price * work.count, t.credit_paise);
   if (amount <= 0) return t.credit_paise;
@@ -141,6 +147,27 @@ export async function chargeQuestions(cx: Db, T: string, h: Hold | null, work: {
   await cx.query(
     `insert into credit_ledger (tuition_id, kind, amount_paise, balance_paise, paper_id, questions, label) values ($1, 'questions', $2, $3, $4, $5, $6)`,
     [T, -amount, after, work.paperId, work.count, work.label],
+  );
+  await cx.query('update tuitions set credit_paise = $2 where id = $1', [T, after]);
+  await shrink(cx, h, amount);
+  return after;
+}
+
+/**
+ * Charges the worked solutions AI wrote for a test, in the transaction that saves them, at the price `h` set aside. `count` is how
+ * many were saved: one that a tutor wrote meanwhile was not, and is not charged. Returns the balance after (null when none were).
+ */
+export async function chargeSolutions(cx: Db, T: string, h: Hold | null, work: { count: number; testId: string; label: string }): Promise<number | null> {
+  if (work.count <= 0) return null;
+  const price = h ? h.solutionPaise : (await creditSettings(cx)).solutionPaise;
+  const t = await q1<{ credit_paise: number }>('select credit_paise from tuitions where id = $1 for no key update', [T], cx);
+  if (!t) return null;
+  const amount = Math.min(price * work.count, t.credit_paise);
+  if (amount <= 0) return t.credit_paise;
+  const after = t.credit_paise - amount;
+  await cx.query(
+    `insert into credit_ledger (tuition_id, kind, amount_paise, balance_paise, test_id, questions, label) values ($1, 'solutions', $2, $3, $4, $5, $6)`,
+    [T, -amount, after, work.testId, work.count, work.label],
   );
   await cx.query('update tuitions set credit_paise = $2 where id = $1', [T, after]);
   await shrink(cx, h, amount);
@@ -219,7 +246,7 @@ export async function askForCredit(T: string, userId: string, amount: number) {
   const code = await creditCode(T);
   return tx(async (cx) => {
     // One tuition's requests are counted one at a time, so several sent at once cannot each pass the count.
-    await cx.query('select 1 from tuitions where id = $1 for update', [T]);
+    await cx.query('select 1 from tuitions where id = $1 for no key update', [T]);
     const waiting = (await q1<{ n: number }>(`select count(*)::int as n from credit_requests where tuition_id = $1 and status = 'waiting'`, [T], cx))!.n;
     if (waiting >= MAX_WAITING) {
       throw new HttpError(409, 'too_many_requests', `You have ${waiting} payments waiting to be checked. Please wait until they are.`);
@@ -242,19 +269,23 @@ export const requestOut = (r: { id: string; amount_paise: number; code: string; 
 
 /**
  * A tuition's credit lines, newest first, as the apps list them. The pages of one paper read on one day are one line ("Read 4
- * pages"), and so are the questions written into one paper on one day. `before` (a time) gives the lines before it.
+ * pages"), and so are the questions written into one paper on one day, and the worked solutions written for one test on one day.
+ * `before` (a time) gives the lines before it.
  */
 export async function historyOf(T: string, opts: { limit: number; before?: Date | null }, db: Db = pool) {
   const rows = await q<{
-    kind: string; amount_paise: number; at: Date; pages: number; questions: number; label: string | null; paper_id: string | null; ref: string | null;
+    kind: string; amount_paise: number; at: Date; pages: number; questions: number; label: string | null; paper_id: string | null;
+    test_id: string | null; ref: string | null;
   }>(
     `select min(l.kind) as kind, sum(l.amount_paise)::int as amount_paise, max(l.created_at) as at,
             count(*) filter (where l.kind = 'page')::int as pages, coalesce(sum(l.questions), 0)::int as questions,
-            coalesce(max(p.exam_name), max(l.label)) as label, max(l.paper_id::text) as paper_id, max(l.ref) as ref
-       from credit_ledger l left join papers p on p.id = l.paper_id
+            coalesce(max(p.exam_name), max(t.title), max(l.label)) as label, max(l.paper_id::text) as paper_id, max(l.test_id::text) as test_id,
+            max(l.ref) as ref
+       from credit_ledger l left join papers p on p.id = l.paper_id left join tests t on t.id = l.test_id
       where l.tuition_id = $1
-      group by case when l.kind in ('page', 'questions')
-                    then l.kind || ':' || coalesce(l.paper_id::text, 'gone:' || coalesce(l.label, '')) || ':' || ((l.created_at at time zone 'Asia/Kolkata')::date)::text
+      group by case when l.kind in ('page', 'questions', 'solutions')
+                    then l.kind || ':' || coalesce(l.paper_id::text, l.test_id::text, 'gone:' || coalesce(l.label, '')) || ':'
+                         || ((l.created_at at time zone 'Asia/Kolkata')::date)::text
                     else l.id::text end
      having $2::timestamptz is null or max(l.created_at) < $2::timestamptz
       order by max(l.created_at) desc
@@ -266,6 +297,7 @@ export async function historyOf(T: string, opts: { limit: number; before?: Date 
     kind: r.kind, amount_paise: r.amount_paise, at: r.at, label: r.label, paper_id: r.paper_id,
     ...(r.kind === 'page' ? { pages: r.pages } : {}),
     ...(r.kind === 'questions' ? { questions: r.questions } : {}),
+    ...(r.kind === 'solutions' ? { solutions: r.questions, test_id: r.test_id } : {}),
     ...(r.kind === 'topup' || r.kind === 'by_hand' ? { ref: r.ref } : {}),
   }));
 }

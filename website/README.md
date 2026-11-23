@@ -74,10 +74,11 @@ Re-check these when the app changes.
 - **Students make their own accounts**, with a username and password or with Google (`app/lib/features/auth/signup_screen.dart`, `google_flow.dart`), and ask to join with the link or QR code a tutor shares for a group or course (`app/lib/features/teacher/invite_screen.dart`), or with the tuition's code; a tutor lets them in. The app keeps no email address (`api/src/lib/google.ts` keeps only Google's account number and the name).
 - **Invite students with a link or a QR code:** Invite students on a group's or course's page.
 - **Other tutors** are added from the app, each with a login of their own.
-- **Prices:** ₹2.40 a page, ₹0.60 a question, ₹20 free to start. They can be changed in the developer app; when they change, change the Pricing section too.
-- **Top-ups in the app:** ₹100, ₹250, ₹500 or ₹1,000 (`TOP_UPS` in `api/src/lib/credit.ts`).
+- **Plans:** Free (20 students, 1 tutor, ₹20 of AI to start), Basic (100 students, 3 tutors, ₹300 of AI a month) and Pro (300 students, 10 tutors, ₹900 of AI a month), from `api/migrations/040_plans.sql`. Sizes and prices are set in the developer app (Settings, Plans); **the Pricing section's plan prices are FILL-INs until they are set there**, and when anything changes, change the Pricing section too.
+- **AI prices:** ₹2.40 a page, ₹0.60 a question, ₹0.40 a worked solution (`credit_*_paise` in the developer app's AI credit settings).
+- **No top-ups:** AI credit is not sold on its own; more AI comes with a bigger plan or the plan's next month (`plans_only` in `api/src/routes/credit.ts`).
 - **Only finished work is charged:** a page is charged in the same step that saves its questions.
-- **The owner can delete the tuition** from Settings, with their password; the app shows the credit that will be lost.
+- **The owner can delete the tuition** from Settings, with their password; the app shows the credit that will be lost and a plan that ends with it, and waits while a plan payment is still to be checked.
 - **The app updates itself** after the first install.
 - **Not claimed:** push notifications (they need Firebase, which is not set up) and particular classes or boards.
 

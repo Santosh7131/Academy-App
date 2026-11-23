@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -9,6 +10,8 @@ import '../../core/api.dart';
 import '../../core/brand.dart';
 import '../../core/levels.dart';
 import '../../core/session.dart';
+import '../../core/share_text.dart';
+import '../../core/web_bits.dart' show saveOrShareFile, savesFiles;
 import '../../theme.dart';
 import '../../ui/kit.dart';
 import '../../ui/qr.dart';
@@ -102,6 +105,10 @@ class _InviteScreenState extends State<InviteScreen> {
     setState(() => _sharing = true);
     try {
       final bytes = await qrPicture(data: _url, title: _label, subtitle: session.tuitionName, code: _code);
+      if (kIsWeb) {
+        await saveOrShareFile(bytes, name: 'join-${_code.replaceAll('-', '')}.png', mimeType: 'image/png', text: _message);
+        return;
+      }
       final dir = await getTemporaryDirectory();
       final file = File('${dir.path}/join-${_code.replaceAll('-', '')}.png');
       await file.writeAsBytes(bytes, flush: true);
@@ -146,10 +153,12 @@ class _InviteScreenState extends State<InviteScreen> {
           Row(children: [
             Expanded(child: SecondaryButton('Copy link', icon: Ph.copy, onTap: _copy)),
             const SizedBox(width: 10),
-            Expanded(child: PrimaryButton('Share link', icon: Ph.shareNetwork, onTap: () => SharePlus.instance.share(ShareParams(text: _message)))),
+            Expanded(child: PrimaryButton('Share link', icon: Ph.shareNetwork, onTap: () async {
+              if (await shareText(_message) && mounted) setState(() => _notice = copiedNotice);
+            })),
           ]),
           const SizedBox(height: 10),
-          SecondaryButton(_sharing ? 'Making the picture…' : 'Share the QR code as a picture', icon: Ph.image, onTap: _sharing ? null : _shareQr),
+          SecondaryButton(_sharing ? 'Making the picture…' : savesFiles ? 'Save the QR code as a picture' : 'Share the QR code as a picture', icon: Ph.image, onTap: _sharing ? null : _shareQr),
           if (_notice != null) ...[const SizedBox(height: 14), InlineNotice(_notice!, tone: Tone.success, icon: Ph.checkCircle)],
           const SizedBox(height: 24),
           Center(child: TextAction(_renewing ? 'Making a new link…' : 'Make a new link', color: danger, onTap: _renewing ? null : _renew)),

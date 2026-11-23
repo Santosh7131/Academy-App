@@ -2,7 +2,7 @@
 // marked option equal to the independently computed `expect` and no other option equal to it,
 // any `verify` check true, balanced LaTeX, and the same right answer after options are arranged.
 // Usage: node tools/check-library.ts
-import { arrange, books } from './library/index.ts';
+import { arrange, books } from '../api/src/ready-made/index.ts';
 
 function value(opt: string): number | null {
   const s = opt

@@ -6,6 +6,7 @@ import '../../core/changes.dart';
 import '../../core/credit.dart';
 import '../../core/format.dart' as f;
 import '../../core/session.dart';
+import '../../core/web_bits.dart' show savesFiles;
 import '../../theme.dart';
 import '../../ui/kit.dart';
 import '../../ui/update_card.dart';
@@ -226,7 +227,15 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
               await api.patch('/teacher/settings', {'tuition_name': _tuition.text.trim(), 'display_name': _name.text.trim()});
               await session.refreshTuitions();
             }, 'Names saved.')),
-        const SectionRule('AI credit', padding: rule),
+        const SectionRule('Plan and AI', padding: rule),
+        RowTile(
+          leading: Icon(Ph.sparkle, size: 20, color: muted),
+          title: 'Plan',
+          meta: 'How many students and tutors, and AI each month',
+          chevron: true,
+          onTap: () => context.push('/t/plan'),
+        ),
+        const SizedBox(height: gapRow),
         ListenableBuilder(
           listenable: credit,
           builder: (context, _) {
@@ -240,6 +249,16 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
             );
           },
         ),
+        if (_tu['role'] == 'owner') ...[
+          const SectionRule('Fees', padding: rule),
+          RowTile(
+            leading: Icon(Ph.currencyInr, size: 20, color: muted),
+            title: 'Fees',
+            meta: 'Who has paid, receipts, reminders and your UPI id',
+            chevron: true,
+            onTap: () => context.push('/t/fees'),
+          ),
+        ],
         const SectionRule('Students joining', padding: rule),
         RowTile(
           title: 'Join code',
@@ -293,7 +312,7 @@ class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObse
         ListenableBuilder(
           listenable: session,
           builder: (context, _) => SegmentedToggle(
-            labels: const ['Phone', 'Light', 'Dark'],
+            labels: [savesFiles ? 'Computer' : 'Phone', 'Light', 'Dark'],
             index: ThemeChoice.values.indexOf(session.theme),
             onChanged: (i) => session.setTheme(ThemeChoice.values[i]),
           ),

@@ -16,7 +16,10 @@ class GoogleAuth {
 
   /// The Google client to sign in with, or null when Google sign-in is off (or the server could not be reached: the next
   /// screen asks again).
-  static Future<String?> clientId() => _asked ??= () async {
+  ///
+  /// The web build has no Google sign-in yet: Google's library signs in on the web only through its own button, with a web client of
+  /// the startup's Google project, which is not set up. Until then a browser logs in with a username and password.
+  static Future<String?> clientId() => kIsWeb ? Future.value(null) : _asked ??= () async {
         try {
           final r = await api.get('/auth/config');
           final id = r is Map ? r['google_client_id'] : null;

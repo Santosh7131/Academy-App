@@ -49,6 +49,8 @@ const groupsBefore = new Set(
   (await snapshot.query('select class_level, subject_id from groups where tuition_id = $1', [FIRST_TUITION])).rows.map((g) => `${g.class_level}:${g.subject_id}`),
 );
 await snapshot.end();
+// The first tuition's plan, put back at the end: it is on Basic while this run gives it a second tutor.
+let planBefore: { plan: string; plan_from: string | null; plan_until: string | null; plan_refilled: string | null } | null = null;
 
 try {
   check('API is up', (await api('GET', '/')).status === 200);
@@ -240,6 +242,13 @@ try {
 
   // Several tutors share one tuition, and the home and group pages group tests by class and subject.
   const tutorName = `${tag}.tutor`;
+  // Free has room for one tutor (lib/plans.ts): the first tuition is on Basic for its second, its AI for the month counted as given
+  // so its credit is as it was.
+  const planDb = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
+  await planDb.connect();
+  planBefore = (await planDb.query('select plan, plan_from::text, plan_until::text, plan_refilled::text from tuitions where id = $1', [FIRST_TUITION])).rows[0];
+  await planDb.query(`update tuitions set plan = 'basic', plan_from = current_date - 1, plan_until = current_date + 31, plan_refilled = current_date - 1 where id = $1`, [FIRST_TUITION]);
+  await planDb.end();
   const nt = await api('POST', '/teacher/tutors', T, { display_name: 'Test Tutor', username: tutorName, password: 'tutor-pass-123' });
   check('a tutor adds another tutor', nt.status === 201 && nt.body?.tutor?.username === tutorName, nt.body);
   created.tutors.push(nt.body?.tutor?.id);
@@ -283,6 +292,20 @@ try {
   check('and the test was never given to them', !resG?.students?.some((x: any) => x.id === late.body.student.id) && resG?.students?.some((x: any) => x.id === s2.body.student.id), resG?.summary);
   const lateDetail = (await api('GET', `/teacher/students/${late.body.student.id}`, T)).body;
   check('nor does the tutor see it among their missed tests', Array.isArray(lateDetail?.missed) && lateDetail.missed.length === 0, lateDetail?.missed);
+
+  // A report for parents covers one period: what was handed in or closed outside it stays out, and a period that is
+  // not a date is refused.
+  const isoQ = (ms: number) => encodeURIComponent(new Date(Date.now() + ms).toISOString());
+  const all2 = (await api('GET', `/teacher/students/${s2.body.student.id}`, T)).body;
+  const year2 = (await api('GET', `/teacher/students/${s2.body.student.id}?from=${isoQ(-365 * 86_400_000)}&to=${isoQ(86_400_000)}`, T)).body;
+  const counts = (d: any) => [d?.attempts?.filter((a: any) => a.submitted_at).length, d?.missed?.length, d?.chapters?.length];
+  check('a report for the past year has every test handed in or missed, and every chapter',
+    JSON.stringify(counts(year2)) === JSON.stringify(counts(all2)) && counts(all2).every((n) => n > 0) && year2.attempts.every((a: any) => a.submitted_at),
+    { year: counts(year2), all: counts(all2) });
+  const ahead = (await api('GET', `/teacher/students/${s2.body.student.id}?from=${isoQ(86_400_000)}`, T)).body;
+  check('and a report from tomorrow on has none of it', JSON.stringify(counts(ahead)) === '[0,0,0]' && ahead.attempts.length === 0, counts(ahead));
+  const notDate = await api('GET', `/teacher/students/${s2.body.student.id}?from=last%20month`, T);
+  check('a period that is not a date is refused', notDate.status === 400 && notDate.body?.error?.code === 'invalid', notDate.body);
 
   // Deadline: the attempt is submitted automatically once the closing time plus grace has passed.
   if (!args.includes('--skip-wait')) {
@@ -339,6 +362,8 @@ try {
   created.tests.push(g.body.id);
   const gp = await api('POST', `/teacher/tests/${g.body.id}/publish`, T, { published: true });
   check('a test can go to a class + subject group', g.status === 201 && gp.status === 200, [g.body, gp.body]);
+  const gRow = (await api('GET', `/teacher/tests/${g.body.id}`, T)).body?.test;
+  check('and names its subject, for the heading of the test printed', gRow?.subject === tag, gRow);
   const S3 = (await login(`${tag}.three`, '4321')).body.token as string;
   const sees = async (token: string) => ((await api('GET', '/student/home', token)).body?.tests ?? []).some((x: any) => x.id === g.body.id);
   check('a group member sees the group test', await sees(S3));
@@ -780,6 +805,11 @@ try {
   const groupsNow = (await db.query('select id, class_level, subject_id from groups where tuition_id = $1', [FIRST_TUITION])).rows;
   const extra = groupsNow.filter((g) => !groupsBefore.has(`${g.class_level}:${g.subject_id}`)).map((g) => g.id);
   if (extra.length) await db.query('delete from groups where id = any($1::uuid[])', [extra]);
+  if (planBefore) {
+    await db.query('update tuitions set plan = $2, plan_from = $3::date, plan_until = $4::date, plan_refilled = $5::date where id = $1', [
+      FIRST_TUITION, planBefore.plan, planBefore.plan_from, planBefore.plan_until, planBefore.plan_refilled,
+    ]);
+  }
   await db.end();
   console.log(`\n${pass} passed, ${fail} failed (test data removed)`);
   process.exit(fail ? 1 : 0);

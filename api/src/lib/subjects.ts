@@ -23,12 +23,13 @@ export const studentSubjects = (tuition: string) => `coalesce((
  * foreign keys to subjects(id), so a subject moved by moveSubject leaves nothing behind (tools/subjects-test.ts checks the list
  * against the database).
  */
-export const BY_SUBJECT = ['chapters', 'questions', 'papers', 'tests', 'groups', 'student_subjects', 'tuition_subjects'] as const;
+export const BY_SUBJECT = ['chapters', 'questions', 'papers', 'tests', 'groups', 'student_subjects', 'tuition_subjects', 'attendance_days'] as const;
 
 /**
  * Renames one of a tuition's subjects. A subject the tuition made itself is renamed where it stands. A standard subject (Maths, Science
  * and the rest) is shared by every tuition, so it cannot change for one: the tuition gets a subject of its own with the new name and
- * everything it kept under the old one (chapters, questions, papers, tests, groups, students, the Library shelves of its groups) moves
+ * everything it kept under the old one (chapters, questions, papers, tests, groups, students, the Library shelves of its groups, the
+ * groups' attendance registers) moves
  * to it in the same step. Nothing changes for any other tuition. No two subjects of a tuition may have the same name.
  */
 export async function renameSubject(tuition: string, id: string, name: string): Promise<{ id: string; name: string; sort_order: number }> {

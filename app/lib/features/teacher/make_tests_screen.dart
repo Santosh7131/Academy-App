@@ -16,7 +16,7 @@ import '../../ui/kit.dart';
 import '../../ui/time_wheels.dart';
 import '../../ui/tokens.dart';
 import 'common.dart';
-import 'credit_screens.dart' show PricedAction;
+import 'credit_screens.dart' show PricedAction, aiWaitsFor;
 import 'make_test.dart';
 import 'paper_runner.dart';
 import 'papers_screens.dart' show AiProgressCard, UploadPaperScreen;
@@ -493,6 +493,15 @@ class _MakeTestsScreenState extends State<MakeTestsScreen> {
     await context.push(target.chatPath);
   }
 
+  /// A test made from questions the tuition has: its own, from papers before, and the ready-made ones a group can add. Once the
+  /// editor has saved it, Make tests closes too, back to the page it was opened from.
+  Future<void> _chooseQuestions() async {
+    final target = _target;
+    if (target == null) return;
+    final saved = await context.push<bool>(target.newTestPath);
+    if (saved == true && mounted) context.pop();
+  }
+
   // ---------------------------------------------------------------- the working
 
   /// Makes the papers on the server with their plans and starts reading them.
@@ -816,7 +825,7 @@ class _MakeTestsScreenState extends State<MakeTestsScreen> {
       );
 
   /// Too little AI credit to read a single page, said on the papers step before any paper is chosen for nothing. Papers can still be
-  /// added; AI reads them once credit is added.
+  /// added; AI reads them once there is more (a bigger plan, or the plan's next month).
   Widget _lowNote() => ListenableBuilder(
         listenable: credit,
         builder: (context, _) {
@@ -825,20 +834,20 @@ class _MakeTestsScreenState extends State<MakeTestsScreen> {
           return Padding(
             padding: const EdgeInsets.only(top: 16),
             child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              InlineNotice("AI credit is ${inr(c.balance)}. AI can't read papers until you add credit.", icon: Ph.coins),
-              Align(alignment: Alignment.centerLeft, child: TextAction('Add credit', color: warning, onTap: () => context.push('/t/credit/add'))),
+              InlineNotice('AI credit is ${inr(c.balance)}. ${aiWaitsFor(c)}', icon: Ph.coins),
+              Align(alignment: Alignment.centerLeft, child: TextAction('See plans', color: warning, onTap: () => context.push('/t/plan'))),
             ]),
           );
         },
       );
 
-  /// A paper stopped because the AI credit did not cover its pages: credit can be added, then the paper tried again from its row.
+  /// A paper stopped because the AI credit did not cover its pages: once there is more, the paper is tried again from its row.
   List<Widget> _noCreditNote() => !_items.any((it) => it.noCredit)
       ? const []
       : [
           const SizedBox(height: 12),
-          const InlineNotice('The AI credit ran out before every page was read. Add credit, then tap Try again on the paper.', icon: Ph.coins),
-          Align(alignment: Alignment.centerLeft, child: TextAction('Add credit', color: warning, onTap: () => context.push('/t/credit/add'))),
+          const InlineNotice('The AI credit ran out before every page was read. When there is more, tap Try again on the paper.', icon: Ph.coins),
+          Align(alignment: Alignment.centerLeft, child: TextAction('See plans', color: warning, onTap: () => context.push('/t/plan'))),
         ];
 
   Widget _head(int step, {String? line}) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -939,6 +948,7 @@ class _MakeTestsScreenState extends State<MakeTestsScreen> {
           SecondaryButton('Add a paper from photos', icon: Ph.camera, onTap: _adding ? null : _addPhotos),
           const SizedBox(height: 18),
           Center(child: _AiLink(onTap: _writeWithAi)),
+          Center(child: _ChooseLink(onTap: _chooseQuestions)),
         ] else ...[
           SectionRule('Papers', count: n, padding: const EdgeInsets.fromLTRB(0, 0, 0, 12)),
           for (final (i, it) in _items.indexed) ...[
@@ -1575,6 +1585,31 @@ class _AiLink extends StatelessWidget {
               child: Text.rich(TextSpan(style: bodyStyle.copyWith(color: muted, fontSize: 14), children: [
                 const TextSpan(text: 'No paper? '),
                 TextSpan(text: 'Let AI write a test', style: bodyStyle.copyWith(fontWeight: FontWeight.w700, color: ink, fontSize: 14)),
+              ])),
+            ),
+          ]),
+        ),
+      );
+}
+
+/// "Or choose questions you have": a test made in the test editor from the tuition's questions, ready-made ones too.
+class _ChooseLink extends StatelessWidget {
+  const _ChooseLink({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Pressable(
+        label: 'Or choose questions you have',
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Ph.listChecks, size: 18, color: muted),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text.rich(TextSpan(style: bodyStyle.copyWith(color: muted, fontSize: 14), children: [
+                const TextSpan(text: 'Or '),
+                TextSpan(text: 'choose questions you have', style: bodyStyle.copyWith(fontWeight: FontWeight.w700, color: ink, fontSize: 14)),
               ])),
             ),
           ]),

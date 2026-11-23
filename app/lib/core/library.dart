@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data' show BytesBuilder;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'api.dart';
 import 'changes.dart';
+import 'web_bits.dart';
 import 'format.dart' as f;
 
 // The Library: files a tutor puts on the shelf of a group or a course, for its people to read and download. A shelf has sections ("PDFs",
@@ -200,7 +202,8 @@ class LibrarySources {
 
   Future<PickedFile> _picked(String name, Future<int?> size, String? Function() path, Stream<List<int>> Function() whole, {String? type}) async {
     final bytes = await size ?? 0;
-    final p = path();
+    // A browser gives a picked file's bytes and never a path on disk (asking file_picker for one there throws).
+    final p = kIsWeb ? null : path();
     return PickedFile(
       name: name,
       size: bytes,
@@ -317,6 +320,16 @@ Future<int> _putOverHttp(UploadJob job, String url, int length, Stream<List<int>
   }
 }
 
+/// In a browser: the bytes are gathered (a browser holds a picked file in memory anyway), then sent with the browser's own request,
+/// which reports how far it has got.
+Future<int> _putFromBrowser(UploadJob job, String url, int length, Stream<List<int>> body, Map<String, String> headers, void Function(int bytes) sent) async {
+  final b = BytesBuilder(copy: false);
+  await for (final chunk in body) {
+    b.add(chunk);
+  }
+  return putWithProgress(url, b.takeBytes(), headers, sent);
+}
+
 /// The files being sent to shelves. It outlives the screens: a tutor can go on using the app while a big file goes up, and the shelf's
 /// page shows what is under way. Files go one at a time, so each gets the whole connection.
 class LibraryUploads extends ChangeNotifier {
@@ -325,7 +338,7 @@ class LibraryUploads extends ChangeNotifier {
   /// How many files have finished, so a screen showing a shelf knows to load it again.
   int doneCount = 0;
 
-  Putter put = _putOverHttp;
+  Putter put = kIsWeb ? _putFromBrowser : _putOverHttp;
   bool _running = false;
   DateTime _lastTick = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -614,6 +627,18 @@ class FileStore {
       }
     } on FileSystemException {
       // A file that is in use stays; the next download tries again.
+    }
+  }
+
+  /// In a browser a file opens in a tab of its own, from storage's link: the browser shows a PDF or a photo there, and saves it from
+  /// there. [tab] was opened at the tap (web_bits.dart's openPendingTab), so that a pop-up blocker lets it through.
+  Future<void> openInBrowser(LibFile file, {required bool teacher, required PendingTab tab}) async {
+    try {
+      final link = await api.get('${teacher ? '/teacher' : '/student'}/library/files/${file.id}/url') as Map;
+      tab.go('${link['url']}');
+    } catch (_) {
+      tab.close();
+      rethrow;
     }
   }
 

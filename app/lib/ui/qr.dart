@@ -10,7 +10,8 @@ import '../theme.dart';
 const _qrInk = Color(0xFF0E0E11);
 const _qrPaper = Color(0xFFFFFFFF);
 
-QrImage qrFor(String data) => QrImage(QrCode(payload: QrPayload.fromString(data), errorCorrectLevel: QrErrorCorrectLevel.medium));
+// qr 3, not 4: the pdf package (printed tests) needs it, and it makes the same standard codes.
+QrImage qrFor(String data) => QrImage(QrCode.fromData(data: data, errorCorrectLevel: QrErrorCorrectLevel.M));
 
 /// Paints [image] into a square of [side] at [at], with the four-module quiet zone around it that the QR standard asks for.
 void paintQr(Canvas canvas, QrImage image, Offset at, double side) {

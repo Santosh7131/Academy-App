@@ -81,6 +81,11 @@ class _Server {
         return _ok({'ok': true});
       case 'POST /teacher/tests':
         return _ok({'id': 't-new'});
+      case 'GET /teacher/credit':
+        return _ok({'credit': {'balance_paise': 10000, 'free_paise': 10000}, 'prices': {'page_paise': 240, 'question_paise': 60, 'solution_paise': 40}});
+      case 'POST /teacher/tests/t-8/solutions':
+        final ids = (jsonDecode(r.body) as Map)['question_ids'] as List;
+        return _ok({'solutions': [for (final id in ids) {'id': id, 'outcome': 'written', 'solution': 'So 5.'}], 'written': ids.length, 'credit_paise': 9000});
     }
     return _ok({'error': {'code': 'not_found', 'message': 'No stub for $call'}}, 404);
   }
@@ -125,6 +130,8 @@ Future<void> _open(WidgetTester t, {String? id = 't-8', String? courseId, double
       ),
     ),
     GoRoute(path: '/edit', builder: (_, _) => TestEditor(id: id, courseId: courseId, courseName: courseId == null ? null : 'Spoken English, Batch 1')),
+    // Stands in for the printed test (print_test.dart has its own tests).
+    GoRoute(path: '/t/tests/:id/print', builder: (_, s) => Scaffold(body: Text('printing ${s.pathParameters['id']}'))),
   ]);
   await t.pumpWidget(MaterialApp.router(
     theme: buildTheme(Brightness.light),
@@ -599,6 +606,71 @@ void main() {
       await _pump(t);
       expect(find.text('Give the test a name.'), findsOneWidget);
       expect(find.text('Save as a draft for now'), findsNothing);
+    });
+  });
+
+  group('printing', () {
+    testWidgets('a draft is saved as it is on the screen, then printed, and stays a draft', (t) async {
+      await _open(t);
+      await t.enterText(find.byType(TextField), 'Half-yearly paper');
+      await _pump(t);
+      await _tap(t, find.text('Print as PDF'));
+      expect(_s.bodies['PATCH /teacher/tests/t-8']?['title'], 'Half-yearly paper', reason: 'the paper has the name on the screen');
+      expect(_s.calls, isNot(contains('POST /teacher/tests/t-8/publish')), reason: 'printing does not post it');
+      expect(find.text('printing t-8'), findsOneWidget);
+      expect(_saved, isNull, reason: 'the settings stay open under the printed test');
+    });
+
+    testWidgets('a posted test prints from its results, not from here', (t) async {
+      _s.test = _groupTest(status: 'published');
+      await _open(t);
+      expect(find.text('See the questions'), findsOneWidget);
+      expect(find.text('Print as PDF'), findsNothing);
+    });
+
+    testWidgets('a new test is saved before it can be printed', (t) async {
+      await _open(t, id: null);
+      expect(find.text('Print as PDF'), findsNothing);
+    });
+
+    testWidgets('a draft that cannot be saved cannot be printed', (t) async {
+      await _open(t);
+      await t.enterText(find.byType(TextField), '');
+      await _pump(t);
+      await _tap(t, find.text('Print as PDF'));
+      expect(_s.calls, isNot(contains('PATCH /teacher/tests/t-8')));
+      expect(find.text('printing t-8'), findsNothing);
+    });
+  });
+
+  group('worked solutions', () {
+    testWidgets('a draft is saved as it is on the screen before AI writes them, and stays a draft', (t) async {
+      await _open(t);
+      expect(find.text('0 of 20 questions have a worked solution'), findsOneWidget);
+      await _tap(t, find.text('Write all 20 with AI · ₹8.00'));
+      await _tap(t, find.text('Write them'), 2500);
+      final firstWrite = _s.calls.indexOf('POST /teacher/tests/t-8/solutions');
+      expect(_s.calls.indexOf('PATCH /teacher/tests/t-8'), allOf(isNot(-1), lessThan(firstWrite)), reason: "saved first, so its questions are the test's");
+      expect(_s.calls.where((c) => c == 'POST /teacher/tests/t-8/solutions').length, 5, reason: 'four questions to a request');
+      expect(_s.calls, isNot(contains('POST /teacher/tests/t-8/publish')));
+      expect(find.text('Every question has a worked solution'), findsOneWidget);
+      expect(_saved, isNull, reason: 'the settings stay open');
+    });
+
+    testWidgets('a draft that cannot be saved says why, and nothing is written', (t) async {
+      await _open(t);
+      await t.enterText(find.byType(TextField), '');
+      await _pump(t);
+      await _tap(t, find.text('Write all 20 with AI · ₹8.00'));
+      await _tap(t, find.text('Write them'));
+      expect(find.text('Give the test a name.'), findsWidgets);
+      expect(_s.calls, isNot(contains('POST /teacher/tests/t-8/solutions')));
+    });
+
+    testWidgets('a posted test has them on its results, not here', (t) async {
+      _s.test = _groupTest(status: 'published');
+      await _open(t);
+      expect(find.textContaining('worked solution'), findsNothing);
     });
   });
 

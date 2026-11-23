@@ -74,7 +74,7 @@ class _ReviewScreenState extends State<ReviewScreen> {
           const SizedBox(height: 16),
           ClipRRect(
             borderRadius: BorderRadius.circular(rSmall),
-            child: Image.network('${item['image_url']}', errorBuilder: (_, _, _) => const SizedBox.shrink()),
+            child: Image.network('${item['image_url']}', webHtmlElementStrategy: WebHtmlElementStrategy.fallback, errorBuilder: (_, _, _) => const SizedBox.shrink()),
           ),
         ],
         const SizedBox(height: 22),

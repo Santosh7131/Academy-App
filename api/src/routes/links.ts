@@ -9,6 +9,7 @@ import { joinPage, linkByCode, linkCodeIn, linkFor, linkUrl, newLinkFor, showLin
 import { groupClassSql, levelParam } from '../lib/levels.ts';
 import { afterTestChange } from '../lib/notify.ts';
 import { pushConfigured, pushToUsers } from '../lib/push.ts';
+import { roomFor } from '../lib/plans.ts';
 
 // Joining a group or a course with its link or QR code. Each group and course has one link (lib/join-links.ts); a student who
 // opens it asks to join (POST /student/join), and a tutor lets them in or declines from Home. Students make their own logins,
@@ -125,6 +126,9 @@ async function accept(t: Tuition, id: string, cx: pg.PoolClient): Promise<{ stud
     cx,
   );
   if (!r) return null;
+  // A student let in takes room on the tuition's plan (lib/plans.ts); one already in here takes no more. The tuition's row is locked
+  // before the student's place, as everywhere else.
+  await roomFor(cx, t.id, 'student', r.student_id);
   const m = await tq1<{ status: string; class_level: number | null }>(
     t.id,
     `select status, class_level from memberships where tuition_id = @T and user_id = $1 and role = 'student' for update`,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
@@ -5,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/api.dart';
 import '../../core/format.dart' as f;
 import '../../core/library.dart';
+import '../../core/web_bits.dart';
 import '../../theme.dart';
 import '../../ui/kit.dart';
 import '../library/file_viewer.dart';
@@ -201,10 +203,11 @@ class _LibraryTabState extends State<LibraryTab> {
       context,
       title: 'Add a file',
       subtitle: 'To ${s.name}, in ${widget.className}',
-      items: const [
-        MenuItem(Ph.filePdf, 'A PDF from this phone', 'pdf'),
-        MenuItem(Ph.image, 'A photo from the gallery', 'gallery'),
-        MenuItem(Ph.camera, 'Take a photo', 'camera'),
+      // A computer's browser picks files from the computer, and has no camera worth taking a page with.
+      items: [
+        MenuItem(Ph.filePdf, savesFiles ? 'A PDF from this computer' : 'A PDF from this phone', 'pdf'),
+        MenuItem(Ph.image, savesFiles ? 'A photo from this computer' : 'A photo from the gallery', 'gallery'),
+        if (!savesFiles) const MenuItem(Ph.camera, 'Take a photo', 'camera'),
       ],
       footnote: 'PDFs and photos, up to 100 MB each.',
     );
@@ -232,7 +235,17 @@ class _LibraryTabState extends State<LibraryTab> {
     if (fine.isNotEmpty && mounted) LibraryEnv.uploads.add(widget.shelf.key, s.id, fine);
   }
 
-  void _open(LibSection s, LibFile file) => context.push('/library/file', extra: FileViewerArgs(file, where: '${widget.className} · ${s.name}', teacher: true));
+  void _open(LibSection s, LibFile file) {
+    if (kIsWeb) {
+      // In a browser the file opens in a tab of its own, opened at the tap so that a pop-up blocker lets it through.
+      final tab = openPendingTab();
+      LibraryEnv.store.openInBrowser(file, teacher: true, tab: tab).catchError((Object e) {
+        if (mounted) showProblem(context, e);
+      });
+      return;
+    }
+    context.push('/library/file', extra: FileViewerArgs(file, where: '${widget.className} · ${s.name}', teacher: true));
+  }
 
   /// Moves a file one place up or down inside its section, the same way a section is moved.
   Future<void> _moveFile(LibSection s, LibFile file, int by) async {

@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/api.dart';
 import '../../core/credit.dart';
+import '../../core/format.dart' as f;
 import '../../core/session.dart';
 import '../../theme.dart';
 import '../../ui/kit.dart';
+import 'plan_screens.dart' show planTitle;
 
 /// Deleting the tuition, for its owner (from Settings): what goes, what is lost, and the password to say so. The server deletes it
 /// (POST /teacher/tuition/delete), and the app signs out after.
@@ -23,10 +25,13 @@ class _DeleteTuitionScreenState extends State<DeleteTuitionScreen> {
   /// The credit left and the payments still waiting, as the server has them now; null until they are loaded.
   Map<String, dynamic>? _credit;
 
+  /// The plan and the plan payments still waiting (GET /teacher/plan); null until loaded, and from a server before plans.
+  Map<String, dynamic>? _plan;
+
   @override
   void initState() {
     super.initState();
-    _loadCredit();
+    _load();
   }
 
   @override
@@ -35,14 +40,29 @@ class _DeleteTuitionScreenState extends State<DeleteTuitionScreen> {
     super.dispose();
   }
 
-  Future<void> _loadCredit() async {
-    try {
-      final r = await api.get('/teacher/credit');
-      if (mounted && r is Map) setState(() => _credit = Map<String, dynamic>.from(r));
-    } on ApiException {
-      // Without it the screen still says that credit left is lost, only without the figure.
+  /// Without the credit the screen still says that credit left is lost, only without the figure; without the plan it says nothing of it.
+  Future<void> _load() async {
+    Future<Map<String, dynamic>?> read(String path) async {
+      try {
+        final r = await api.get(path);
+        return r is Map ? Map<String, dynamic>.from(r) : null;
+      } on ApiException {
+        return null;
+      }
     }
+
+    final got = await Future.wait([read('/teacher/credit'), read('/teacher/plan')]);
+    if (!mounted) return;
+    setState(() {
+      _credit = got[0];
+      _plan = got[1];
+    });
   }
+
+  static int _sum(Object? requests) => (requests is List ? requests : const []).whereType<Map>().fold<int>(
+        0,
+        (sum, w) => sum + (w['amount_paise'] is num ? (w['amount_paise'] as num).toInt() : 0),
+      );
 
   Future<void> _delete() async {
     if (_password.text.isEmpty || _busy) return;
@@ -69,9 +89,13 @@ class _DeleteTuitionScreenState extends State<DeleteTuitionScreen> {
     final c = _credit;
     final balanceRaw = c?['credit'] is Map ? (c!['credit'] as Map)['balance_paise'] : null;
     final balance = balanceRaw is num ? balanceRaw.toInt() : credit.value?.balance;
-    final waiting = (c?['waiting'] is List ? c!['waiting'] as List : const []).whereType<Map>();
-    final waitingPaise = waiting.fold<int>(0, (sum, w) => sum + (w['amount_paise'] is num ? (w['amount_paise'] as num).toInt() : 0));
-    final ready = _password.text.isNotEmpty && !_busy;
+    final waitingPaise = _sum(c?['waiting']);
+    // A Basic or Pro plan still running ends with the tuition, however long it had left.
+    final plan = _plan?['plan'] is Map ? _plan!['plan'] as Map : const {};
+    final paidPlan = (plan['name'] == 'basic' || plan['name'] == 'pro') && plan['lapsed'] != true && plan['last_day'] is String;
+    final planWaitingPaise = _sum(_plan?['waiting']);
+    // The server refuses while a plan payment waits (it would go with the tuition, unmatched): the button waits too.
+    final ready = _password.text.isNotEmpty && !_busy && planWaitingPaise == 0;
     return PushedPanel(
       kicker: 'Settings',
       title: 'Delete the tuition',
@@ -85,6 +109,14 @@ class _DeleteTuitionScreenState extends State<DeleteTuitionScreen> {
             'keeps their login and that tuition.'),
         const _Line(Ph.userCircle, 'Your own login goes too, unless you also tutor in another tuition.'),
         _Line(Ph.coins, balance == null ? 'Any AI credit left is lost.' : (balance > 0 ? 'The AI credit left, ${inr(balance)}, is lost.' : 'There is no AI credit left to lose.')),
+        if (paidPlan)
+          _Line(Ph.calendarBlank, 'Your ${planTitle(plan['name'])} plan ends with it, though it runs until '
+              '${f.longDate(f.dayOf('${plan['last_day']}'))}.'),
+        if (planWaitingPaise > 0) ...[
+          const SizedBox(height: 4),
+          InlineNotice('${inr(planWaitingPaise)} you paid for a plan is still waiting to be checked. The tuition can be deleted once it '
+              'has been checked.', icon: Ph.warning),
+        ],
         if (waitingPaise > 0) ...[
           const SizedBox(height: 4),
           InlineNotice('${inr(waitingPaise)} you paid is still waiting to be checked. Delete the tuition only after it is added: once the '

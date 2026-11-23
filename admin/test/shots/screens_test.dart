@@ -96,12 +96,12 @@ Map<String, Object?> _clients() {
   final rows = [
     _client(id: 'c-1', name: 'Priya Maths Classes', owner: 'Priya Raman', students: 18, tutors: 2, pending: 2, groups: 4, tests: 9, papers: 12, seen: const Duration(minutes: -12), today: 214, month: 3980, total: 4210, calls: 142, failed: 3, cost: 18.42, all: 22.1, daysOld: 41,
         library: _library(pdfs: 38, pdfMb: 390, photos: 12, photoMb: 22, uploading: 1),
-        credit: _creditOf(8040, waiting: 1, waitingPaise: 25000, added: 10000, used: 7740)),
+        credit: _creditOf(27920, added: 29000, used: 7740)),
     // Four fifths of the limit and more: the Library line turns amber.
     _client(id: 'c-2', name: 'Arun Science Academy', owner: 'Arun Kumar', students: 11, tutors: 1, groups: 2, tests: 5, papers: 6, seen: const Duration(hours: -5), today: 96, month: 1710, total: 1730, calls: 61, failed: 0, cost: 9.8, all: 9.8, daysOld: 20,
         library: _library(pdfs: 120, pdfMb: 1700, photos: 40, photoMb: 40),
         // Less than a page left: low.
-        credit: _creditOf(150, waiting: 1, waitingPaise: 10000, added: 10000, used: 4980)),
+        credit: _creditOf(150, added: 10000, used: 4980)),
     _client(id: 'c-3', name: 'Meera English Hub', owner: 'Meera Nair', students: 4, tutors: 1, groups: 1, tests: 1, papers: 2, seen: const Duration(days: -2), today: 0, month: 240, total: 240, calls: 20, failed: 1, cost: 10.43, all: 10.43, daysOld: 3,
         library: _library(),
         // Less than a question left: AI paused.
@@ -114,9 +114,10 @@ Map<String, Object?> _clients() {
     'totals': {
       'clients': 3, 'active_week': 3, 'students': 33, 'tutors': 4, 'requests_today': 310, 'requests_month': 5930,
       'ai_calls_month': 223, 'ai_cost_month_inr': 38.65, 'ai_cost_unattributed_month_inr': 0.0, 'library_bytes': (412 + 1740) * _mb,
-      'credit_waiting': 2, 'credit_waiting_paise': 35000, 'credit_added_month_paise': 30000, 'credit_used_month_paise': 16320,
+      'credit_waiting': 0, 'credit_waiting_paise': 0, 'credit_added_month_paise': 39000, 'credit_used_month_paise': 16320,
+      'plan_waiting': 2, 'plan_waiting_paise': 249600,
     },
-    'credit_prices': {'page_paise': 240, 'question_paise': 60},
+    'credit_prices': {'page_paise': 240, 'question_paise': 60, 'solution_paise': 40},
     'clients': rows,
   };
 }
@@ -156,12 +157,14 @@ Map<String, Object?> _clientDetail() => {
       ],
       'last_week': {'papers': 3, 'tests': 4, 'attempts': 47},
       'credit': {
-        'balance_paise': 8040, 'added_month_paise': 10000, 'used_month_paise': 7740,
-        'waiting': [_request('r-1', 25000, 'CR-7K3Q', const Duration(minutes: -18))],
+        'balance_paise': 27920, 'added_month_paise': 29000, 'used_month_paise': 7740,
+        // Credit is no longer sold on its own, so nothing waits here: plan payments wait on the Plans screen.
+        'waiting': [],
         'lines': [
+          {'kind': 'solutions', 'amount_paise': -520, 'at': _iso(const Duration(minutes: -12)), 'label': 'Unit test 3', 'paper_id': null, 'test_id': 't-3', 'solutions': 13},
           {'kind': 'page', 'amount_paise': -960, 'at': _iso(const Duration(minutes: -30)), 'label': 'Practice Paper 2', 'paper_id': 'p-1', 'pages': 4},
           {'kind': 'questions', 'amount_paise': -600, 'at': _iso(const Duration(minutes: -62)), 'label': '10th Maths', 'paper_id': null, 'questions': 10},
-          {'kind': 'topup', 'amount_paise': 10000, 'at': _iso(const Duration(days: -5)), 'label': null, 'paper_id': null, 'ref': '4281936502170'},
+          {'kind': 'plan', 'amount_paise': 29000, 'at': _iso(const Duration(hours: -3)), 'label': 'Basic plan', 'paper_id': null},
           {'kind': 'by_hand', 'amount_paise': 5000, 'at': _iso(const Duration(days: -12)), 'label': null, 'paper_id': null, 'ref': 'CR-4TXH'},
           {'kind': 'start', 'amount_paise': 2000, 'at': _iso(const Duration(days: -41)), 'label': null, 'paper_id': null},
         ],
@@ -177,7 +180,7 @@ Map<String, Object?> _request(String id, int paise, String code, Duration asked,
 
 /// The developer's credit screen: the settings, the requests waiting and decided, and this month.
 Map<String, Object?> _credit({String upi = 'upi-id@bank', bool costs = true}) => {
-      'settings': {'page_paise': 240, 'question_paise': 60, 'start_paise': 2000, 'new_clients_ai': true, 'upi_id': upi, 'upi_name': upi.isEmpty ? '' : 'Your name'},
+      'settings': {'page_paise': 240, 'question_paise': 60, 'solution_paise': 40, 'start_paise': 2000, 'new_clients_ai': true, 'upi_id': upi, 'upi_name': upi.isEmpty ? '' : 'Your name'},
       'waiting': [
         _request('r-1', 25000, 'CR-7K3Q', const Duration(minutes: -18), client: ('c-1', 'Priya Maths Classes', 'Priya Raman')),
         _request('r-2', 10000, 'CR-M92X', const Duration(hours: -3), client: ('c-2', 'Arun Science Academy', 'Arun Kumar')),
@@ -188,8 +191,51 @@ Map<String, Object?> _credit({String upi = 'upi-id@bank', bool costs = true}) =>
       ],
       'month': {
         'credit_added_paise': 30000, 'credit_used_paise': 16320, 'pages': costs ? 41 : 0, 'questions': costs ? 108 : 0, 'ai_worth_inr': 38.65,
-        'page_cost_inr': costs ? 0.41 : null, 'question_cost_inr': costs ? 0.05 : null, 'answers_cost_inr': 5.92,
+        'page_cost_inr': costs ? 0.41 : null, 'question_cost_inr': costs ? 0.05 : null, 'answers_cost_inr': 5.92, 'solutions': costs ? 23 : 0,
+        'solution_cost_inr': costs ? 0.04 : null,
       },
+    };
+
+/// A plan payment as GET /admin/plans lists it, with its client and the plan the client is on now.
+Map<String, Object?> _planRequest(String id, String plan, int months, int paise, String code, Duration ago,
+        {String status = 'waiting', required (String, String, String) client, String clientPlan = 'free', String? lastDay}) =>
+    {
+      'id': id, 'plan': plan, 'months': months, 'amount_paise': paise, 'code': code, 'upi_id': 'upi-id@bank', 'status': status,
+      'created_at': _iso(ago), 'decided_at': status == 'waiting' ? null : _iso(ago + const Duration(hours: 2)),
+      'client_id': client.$1, 'client': client.$2, 'owner': client.$3, 'client_plan': clientPlan, 'client_last_day': lastDay,
+    };
+
+/// What the plans screens ask for (GET /admin/plans). The prices are stand-ins: the real ones are set in the app.
+Map<String, Object?> _plans({bool prices = true}) => {
+      'settings': {
+        'free': {'students': 20, 'tutors': 1},
+        'basic': {'students': 100, 'tutors': 3, 'ai_month_paise': 30000, 'price_month_paise': prices ? 49900 : null},
+        'pro': {'students': 300, 'tutors': 10, 'ai_month_paise': 90000, 'price_month_paise': prices ? 99900 : null},
+        'pay_where': 'both',
+      },
+      'waiting': [
+        _planRequest('pr-1', 'basic', 3, 149700, 'CR-7K3Q', const Duration(minutes: -25), client: ('c-1', 'Priya Maths Classes', 'Priya Raman')),
+        _planRequest('pr-2', 'pro', 1, 99900, 'CR-M92X', const Duration(hours: -4),
+            client: ('c-2', 'Arun Science Academy', 'Arun Kumar'), clientPlan: 'basic', lastDay: '2027-01-23'),
+      ],
+      'done': [
+        _planRequest('pr-0', 'basic', 1, 49900, 'CR-4TXH', const Duration(days: -6), status: 'received', client: ('c-3', 'Meera English Hub', 'Meera Nair')),
+      ],
+      'month': {'paid_paise': 49900, 'given': 1},
+      'clients': {'free': 9, 'basic': 2, 'pro': 1},
+    };
+
+/// A client's plan (GET /admin/clients/:id/plan).
+Map<String, Object?> _clientPlan() => {
+      'plan': {
+        'name': 'basic', 'bought': 'basic', 'from': '2026-11-24', 'until': '2027-02-24', 'last_day': '2027-02-23', 'lapsed': false,
+        'next_month_on': '2026-12-24',
+      },
+      'used': {'students': 18, 'tutors': 2},
+      'periods': [
+        {'id': 'pp-1', 'plan': 'basic', 'months': 3, 'amount_paise': 149700, 'from': '2026-11-24', 'last_day': '2027-02-23', 'ref': 'CR-7K3Q', 'created_at': _iso(const Duration(hours: -1))},
+      ],
+      'waiting': [],
     };
 
 Map<String, Object?> _phones() => {
@@ -277,6 +323,8 @@ void main() {
       ..['/admin/clients/c-1'] = ((_) => _clientDetail())
       ..['/admin/phones'] = ((_) => _phones())
       ..['/admin/credit'] = ((_) => _credit())
+      ..['/admin/plans'] = ((_) => _plans())
+      ..['/admin/clients/c-1/plan'] = ((_) => _clientPlan())
       ..['/admin/people'] = ((_) => {
             'many_threshold': 3,
             'people': [
@@ -340,6 +388,24 @@ void main() {
       await t.tap(find.text('Add credit'));
       await _settle(t);
       await t.enterText(find.byType(TextField).first, '250');
+      await _settle(t);
+    });
+  });
+
+  shotTest('plan payments', (t) async {
+    await _both(t, 'admin-plan-requests', () => const PlanRequestsScreen(), height: 3000);
+  });
+
+  shotTest('plan settings', (t) async {
+    await _both(t, 'admin-plan-settings', () => const PlanSettingsScreen(), height: 3400);
+    // Before any plan has a price.
+    routes['/admin/plans'] = (_) => _plans(prices: false);
+    await _both(t, 'admin-plan-settings-unset', () => const PlanSettingsScreen(), height: 3400);
+  });
+
+  shotTest('a client: giving a plan', (t) async {
+    await _both(t, 'admin-plan-give', () => const ClientScreen(id: 'c-1', name: 'Priya Maths Classes'), height: 2400, then: (t) async {
+      await t.tap(find.text('Give a plan'));
       await _settle(t);
     });
   });

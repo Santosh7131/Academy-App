@@ -30,12 +30,28 @@
   time, and the questions mixed up for each student if you like.
 - See each student's average, weakest chapters and missed tests. Fix a wrong answer once and
   everyone is marked again.
+- Send parents a report as a picture, with the tuition's name: a month's marks, tests written
+  and missed, chapters to practise and the ones going well, and a line from the tutor.
+- Print a test as an A4 PDF with the tuition's name at the top, for a written exam: maths, tables,
+  figures, Hindi and Tamil as on screen, a case study's passage once above its questions, no
+  question split across pages, and the answer key on a page of its own when you ask for it. A
+  draft prints from its settings, so a paper for a written exam never has to be posted.
+- Ask AI for the worked solutions of a test's questions. AI works each one out without being told
+  the answer you marked, and a solution is kept only when it reaches that answer; the questions it
+  could not match are named, so you can check their answers. Students see a solution after they
+  hand the test in.
+- Take attendance for a group or a course: everyone starts as here, and you tap who is away. A
+  message for each absent student's parents is ready to send on WhatsApp, and attendance shows on
+  the student's page and in the report for parents.
+- Keep fees: a monthly fee for each student, payments in cash or UPI with numbered receipts to
+  share, who has paid this month and who has not, and a reminder for parents. Only the tuition's
+  owner sees fees.
 - Every posted test stays in the Bank to post again. A Library shares notes and PDFs. Several tutors
   can share one tuition.
 - Invite students with a group's or course's link or QR code. They make their own accounts and ask
   to join; you let them in one at a time, or all at once.
-- Prepaid AI credit: ₹2.40 a page read, ₹0.60 a question written, ₹20 free to start. Tests,
-  students and marking are free.
+- Prepaid AI credit: ₹2.40 a page read, ₹0.60 a question written, ₹0.40 a worked solution, ₹20
+  free to start. Tests, students and marking are free.
 
 **For students**
 
@@ -44,6 +60,8 @@
 - Join a tutor's group or course by scanning its QR code or opening its link.
 - One question at a time. If the internet drops, the answers stay on the phone until it is back.
 - Marks and the right answers the moment they hand in.
+- Their attendance, and their fees: pay by UPI from the app, straight to the tutor, then tell the
+  tutor it is paid.
 
 **For the developer:** an admin app with the clients, their AI credit and payment requests, the
 phones and app versions in use, and how the server is doing.
@@ -52,7 +70,7 @@ phones and app versions in use, and how the server is doing.
 
 | | |
 |---|---|
-| `app/` | Flutter, Android. Tutors and students use the same app. |
+| `app/` | Flutter, for Android and for browsers (see "The web version"). Tutors and students use the same app. |
 | `admin/` | Flutter, Android. The developer's console. |
 | `api/` | TypeScript and Hono on Neon Functions, with Postgres and object storage on Neon. |
 | AI | Google Gemini reads the pages; Groq's gpt-oss models, with a Gemini checker, work out the answers. |
@@ -242,26 +260,61 @@ To turn it on, in the Google Cloud console (APIs & Services):
 
 Client ids are not secrets. `tools/google-test.ts` checks the token check with no network.
 
+## Plans
+
+Every tuition is on a plan (`api/src/lib/plans.ts`, `api/src/routes/plans.ts`, migration 040): Free,
+Basic or Pro. A plan sets how many students and tutors the tuition can have and how much AI comes
+with it; everything else in the app works on every plan. Santosh chose the sizes on 24 November 2026
+("Bigger tiers") and that more AI comes only with a bigger plan or the plan's next month ("Upgrade
+only").
+
+- **Sizes and prices** are app settings, changed in the admin app (Settings → Plans): Free 20
+  students and 1 tutor, with the one-time free credit to start; Basic 100 students, 3 tutors and
+  ₹300 of AI a month; Pro 300 students, 10 tutors and ₹900 of AI a month. Migration 040 sets no
+  price: a plan is on sale only once it has a price and a UPI id is set (Settings → Prices and
+  payment details). One setting says where plans are sold: in the app and the web version, or only
+  one of them (the web version sends `x-os: web`).
+- **Room.** Letting someone in past the plan's room is refused with 402 `plan_students_full` or
+  `plan_tutors_full`, at all seven places that let a student or tutor in or turn one back on
+  (`roomFor`, under the tuition's lock, so two at once never take one place twice). Nobody is ever
+  turned off; turning someone off always works.
+- **AI every month.** On Basic and Pro, the first AI work or look at the credit in each plan month
+  tops the credit up to the plan's AI, once (a `plan` line in the credit history). It never lowers
+  credit above it, and unused AI does not pile up. When it runs out, AI waits for the next plan
+  month or a bigger plan (402 `no_credit`, saying which). AI left when a plan ends stays usable.
+- **Buying.** The owner picks a plan and 1, 3, 6 or 12 months (the price times the months), pays by
+  UPI with the tuition's code in the note, and taps "I have paid" (`POST /teacher/plan/requests`; at
+  most 3 wait at once). The developer marks it received (the plan starts that day, or runs on after
+  the same plan's last day) or declines it (`/admin/plans/requests/:id/receive`, `/decline`), and can
+  give or end a plan by hand (`/admin/clients/:id/plan`). A bigger plan starts the day it is
+  received; a smaller one is refused while a bigger one runs unless the developer says to replace it.
+- **Ending.** A plan past its last day counts as Free. Everyone stays and nothing is deleted; only
+  letting more people in than Free allows waits. Received plan payments stay on record with the
+  tuition's name if the tuition is deleted.
+
+`tools/plans-test.ts` checks all of it against the local stack, with every AI call scripted.
+
 ## AI credit
 
-AI work is paid for in advance, from each tuition's credit; everything else in the app is free.
-Amounts are kept in paise (`api/src/lib/credit.ts`, migration 033).
+AI work is paid for in advance, from each tuition's credit, which the tuition's plan fills (see
+"Plans"). Amounts are kept in paise (`api/src/lib/credit.ts`, migration 033).
 
-- **Prices.** AI reading a page costs ₹2.40 and AI writing a question ₹0.60, and a new tuition
-  starts with ₹20. The developer changes all three in the admin app (Settings → AI credit), and
+- **Prices.** AI reading a page costs ₹2.40, AI writing a question ₹0.60 and a worked solution ₹0.40
+  (migration 037), and a new tuition starts with ₹20. The developer changes all four in the admin app
+  (Settings → AI credit), and
   tutors see a new price at once. Turning off "New clients can use AI" gives new tuitions no free
-  credit; they can still buy it.
+  credit; they can still buy a plan.
 - **Only finished work is charged.** Before AI starts, the price of the whole job is set aside. A
   page is charged in the same transaction that saves its questions (once for each picture of it),
-  questions when they are written, and whatever did not finish is let go. Two jobs at once never
+  questions when they are written, a worked solution when it is kept, and whatever did not finish
+  is let go. Two jobs at once never
   spend the same rupees. When the credit runs out, AI stops and the app says why.
-- **Adding credit.** The tutor picks ₹100, ₹250, ₹500 or ₹1,000 (`TOP_UPS`), pays by UPI to the
-  UPI id set in the admin app with the tuition's code in the payment note, and taps "I have paid"
-  (`POST /teacher/credit/requests`; at most 5 can wait at once). The developer checks the payment
-  and marks the request received, with its UPI reference if they type one, or declines it
-  (`/admin/credit/requests/:id/receive` or `/decline`). The developer can also add credit by hand,
-  up to ₹1,00,000 at a time (`POST /admin/clients/:id/credit`). Until a UPI id is set, tutors can
-  use their free credit but cannot ask for more.
+- **No credit on its own.** Since plans, a tutor cannot buy credit by itself: `POST
+  /teacher/credit/requests` is refused with 409 `plans_only`, and `GET /teacher/credit` says
+  `topups: false`. The code for it stays (`askForCredit`, `TOP_UPS`), so it can come back. Requests
+  from before plans can still be marked received or declined (`/admin/credit/requests/:id/receive`
+  or `/decline`). The developer can add credit by hand, up to ₹1,00,000 at a time
+  (`POST /admin/clients/:id/credit`).
 - **What the tutor sees:** the balance on Home, the price before every AI job, a note when credit
   is short, and what the credit was spent on (`GET /teacher/credit`, `/teacher/credit/history`).
 
@@ -274,16 +327,23 @@ a wrong password counts as a wrong try, as at login). In one transaction everyth
 goes, its tests first so their questions can follow, and so do the accounts of its tutors who are in
 no other tuition; their old logins stop working. Students keep their accounts, which are their own:
 a student loses this tuition and what they wrote there, keeps any other tuition and its results,
-and can join another. Payments stay on record with the tuition's name (migration
+and can join another. AI credit payments stay on record with the tuition's name (migration
 034 keeps the top-ups and the credit added by hand; migration 035 tidies the ledger the same way
 for any other delete of a tuition, such as a check's clean-up or one run by hand), and the tuition's
-files are removed from storage afterwards. Unused credit is lost; the screen says how much before the owner confirms.
+files are removed from storage afterwards. Unused credit is lost, and so is the rest of a running
+plan; the screen says both before the owner confirms. While one of the tuition's plan payments is
+still waiting to be checked, the delete is refused (409 `plan_payment_waiting`): the payment would
+go with the tuition and leave the developer with money that matches nothing. Once it is received
+(it then stays on record with the tuition's name) or declined, the tuition can go.
+Its registers and fee records (see "Attendance" and "Fees") are the tuition's own and go with it.
 
 `tools/delete-test.ts` checks it against the local stack.
 
 A student deletes their own account from their profile (`POST /auth/delete-account`), with their
 password, or by choosing their Google account again if they sign in with Google. Everything of
-theirs goes with it, in every tuition. Google Play asks apps with accounts to offer this. Tutors who
+theirs goes with it, in every tuition, except the fee payments their tutors recorded: those stay in
+each tuition's records under the student's name (see "Fees"). Google Play asks apps with accounts to
+offer this. Tutors who
 do not own a tuition cannot delete their own accounts yet.
 
 ## Groups and subjects
@@ -337,25 +397,30 @@ Deleting a paper also deletes the questions saved from it that no test uses.
 
 ## Ready-made questions
 
-The app no longer offers these: the tutor said they are not needed (2026-10-09). The questions
-and their draft chapter tests stay in the database and the tools stay here, but no screen lists
-them, the group page leaves the draft chapter tests out, and the test editor's question picker
-skips them.
-
-`tools/library/` holds original chapter-wise MCQs, with worked solutions, written for the
+`api/src/ready-made/` holds original chapter-wise MCQs, with worked solutions, written for the
 NCERT 2026-27 books (nothing is copied from a paper or a book): ten per chapter for Class 7
 Maths (Ganita Prakash, 15 chapters), Class 8 Maths (Ganita Prakash, 14), Class 9 Maths
 (Ganita Manjari, 14) and Science (Exploration, 13), and Class 10 Maths (14) and Science (13).
-That is 830 questions. Every answer is proved before it can be imported:
+That is 830 questions. Every answer is proved by `node tools/check-library.ts`.
 
-```bash
-node tools/check-library.ts
-node tools/seed-library.ts --env .env.local
-```
+Since 24 November 2026 every tuition can add them (they were hidden on 9 October 2026 in the
+original app, at its tutor's request). The test editor's question picker, for a group whose class
+and subject have a book, offers it while the tuition has none of its questions: "Add 140
+questions". A tutor gets there from Make tests: under "No paper? Let AI write a test", "Or choose
+questions you have" opens a new test for that group or course in the test editor (`/t/tests/new`,
+with the class chosen), and Make tests closes once the test is saved. `POST /teacher/ready-made` (`api/src/routes/ready-made.ts`, `api/src/lib/ready-made.ts`)
+copies the book's chapters and questions into the tuition as its own questions, marked
+Ready-made in the picker, so a tutor can change or delete them like any other. The book is found
+by the subject's name: Maths (or Mathematics) and Science. A chapter the tuition already has with
+the same name is used as it is. Adding again adds only the questions the tuition no longer has,
+and never changes one the tutor changed: each copy's `library_key` holds the tuition's id. It
+uses no AI and costs nothing on any plan, and asking AI for the worked solutions of these
+questions charges nothing, since each has one. No draft chapter tests are made.
+`node tools/ready-made-test.ts` checks it.
 
-The import adds each book's chapters, its questions (tagged Ready-made in the app) and one
-draft chapter test per chapter for the class's group. It is safe to run again: rows are
-matched by `library_key`, and a chapter test that has been published or written is left alone.
+`node tools/seed-library.ts` is the older import, kept from the original app: it fills only the
+first tuition (made by migration 012) and makes a draft chapter test per chapter. The startup
+does not need it.
 
 ## Question papers
 
@@ -541,6 +606,113 @@ Models write LaTeX in JSON with one backslash (`\frac`), which JSON reads as a f
 checked by `node tools/latex-json-test.mjs`), and an option that is all maths but came without
 `$...$` gets them.
 
+## Worked solutions
+
+A test's results, and a draft's settings, show how many of its questions have a worked solution, and
+offer to write the rest with AI at the price shown (`app/lib/features/teacher/worked_solutions.dart`).
+After a card that says what it costs, the app sends the questions four at a time
+(`POST /teacher/tests/:id/solutions`, `api/src/routes/solutions.ts`); one AI call answers the four.
+A draft is saved first, so its questions are the test's.
+
+- **AI is never told the answer marked.** The model (Gemini 3.1 Flash-Lite when its key is set, then
+  gpt-oss-120b and gpt-oss-20b; `GROQ_SOLUTION_MODELS`) works each question out, writes the working
+  in the question's language with maths in LaTeX, and says which option it reached. The solution is
+  kept only when that is the option marked. One that reaches another option, needs a figure AI
+  cannot see, or names an option by its letter is not kept and costs nothing: students see the
+  options in an order of their own, so "option B" would be wrong on most screens. The app names the
+  questions AI could not match, with the letter it reached and the one marked, so a wrong answer
+  key shows itself.
+- **Never replaced.** A question that has a solution, the tutor's or AI's, is left as it is. The
+  save takes a question only while it has none, in the transaction that charges for it, so a
+  solution typed meanwhile stays and a repeated request is not charged twice.
+- **Whose it is.** `questions.solution_by_ai` marks a solution AI wrote, and the question editor
+  says so. The tutor changing it makes it theirs. Changing a question's answer removes a solution
+  that is still AI's, since it reached the old answer; the editor says so before saving.
+- **Students** see a solution in their review after they hand the test in, as before; nothing is
+  sent while they write it.
+
+`node tools/solutions-test.mjs` checks the prompt and how a reply is read, offline;
+`node tools/solutions-test.ts` checks the route end to end against the local stack, with the model
+scripted. Neither has seen a real model's solutions: the server here has no AI keys.
+
+## Attendance
+
+A tutor takes a class's register for a day: everyone starts as here, the tutor taps who is away and
+saves (`app/lib/features/teacher/attendance_screens.dart`, `api/src/routes/attendance.ts`, migration
+038). A class is a group (a class level and a subject, the way tests name one) or a course.
+
+- **One register per class per day.** Two tutors taking the same class's register for the same day
+  update the same one (`PUT /teacher/attendance` saves with `on conflict`). A day that has not come
+  is refused, and so is one more than a year ago. Each student on a register has a row of their
+  own, so it still says who was there after a student changes class or leaves.
+- **Where it shows.** A group's and a course's page say how today stands, and a month of registers
+  is one page (`GET /teacher/attendance/month`). A student's page and the report for parents give
+  the student's attendance; the student's Home shows this month's once a register has been taken.
+- **Telling parents.** Once a register is saved, a message is ready for each student marked away,
+  sent through the share sheet (WhatsApp or anything else). The app keeps no phone numbers.
+- **What goes with what.** Removing a student from the tuition takes their marks, as it takes their
+  results. Deleting a course, a subject or the tuition takes its registers.
+
+`node tools/attendance-test.mjs` checks the rules offline; `node tools/attendance-test.ts` checks the
+routes end to end against the local stack and needs migration 038.
+
+## Timetable
+
+A class's times and the link to join it online (`api/src/routes/timetable.ts`, `api/src/lib/timetable.ts`, migration 041). A class is a
+group or a course, as for registers. Any tutor of the tuition keeps it, from the Timetable button on the class's page.
+
+- **A time** is a set of weekdays (Monday 1 to Sunday 7) at one time of day in India, for 10 minutes to 6 hours, with an optional
+  link and a note of up to 80 characters. A class has up to 10 times (409 `too_many_times`, checked under the class's lock).
+- **The link** is the tutor's own Google Meet, Zoom, Jitsi or other online class: the app has no video of its own. The server takes
+  only a plain https link with a website and no login in it, up to 500 characters, and refuses anything else (400) rather than
+  cleaning it up; the app checks again before it opens one, and names the website on the button. On a phone it opens in the Meet,
+  Zoom or Jitsi app when one is installed, else the browser (`Links.kt`); in the web version, in a new tab cut off from the app, or
+  in the same tab when the browser blocks new ones.
+- **Students** see today's classes on their Home, earliest first, with Join on those that have a link; on a day with none, the
+  next class. "Today" is India's calendar on the server's clock, never the phone's. A student sees the times of the groups of their
+  class whose subject they take and of their courses, and none while their place is turned off.
+- A time belongs to the group's or course's own row: removing a group or deleting a course takes its times, and renaming a subject
+  keeps them.
+
+`tools/timetable-test.ts` checks it against the local stack.
+
+## Fees
+
+Only the tuition's owner sees fees (`app/lib/features/teacher/fees_screens.dart`,
+`api/src/routes/fees.ts`, `api/src/lib/fees.ts`, migration 039). A helper tutor is refused them and
+sees none on Home or on a student's page. Money is whole paise throughout.
+
+- **The fee.** A monthly fee for chosen students, a group or a course, from this month or the next,
+  due on a day from 1 to 28 (`fee_rates`, a row per student per month it starts). Setting a fee
+  replaces any change planned after it; ₹0 stops it.
+- **The month at a glance.** `GET /teacher/fees?month=` gives the totals (expected, collected,
+  waiting to be confirmed, left, late), each student's state, payments to confirm, payments for
+  students no longer in the tuition, and students with no fee. A student's own page lists their
+  months and payments, with "Remind the parents": a message with the months owed, the amount and
+  the UPI id, through the share sheet.
+- **Payments and receipts.** A payment is recorded in cash, UPI or other, for one month, with the
+  day it was paid and an optional note such as a UPI reference. Each takes the tuition's next
+  receipt number (`tuitions.fee_receipt_no`), so no number is given twice, even after a payment is
+  taken away. The receipt is shared as a picture with the tuition's name, light whatever the
+  phone's theme.
+- **Paying by UPI from the student's app.** The owner adds a UPI id and the name it shows
+  (`PUT /teacher/fees/upi`). The student's Fees screen then shows a UPI QR code for the oldest
+  month owed, a button that opens a UPI app on the phone with the amount and a note filled in
+  (`upi://pay`, `app/lib/core/upi.dart` and `Upi.kt`), and "Send the details to a parent". The app
+  cannot see a payment, so it never says one went through: the student taps "I have paid"
+  (`POST /student/fees/paid`, with an optional reference), the owner is notified, and it waits on
+  their Fees screen to confirm or mark not received. Recording a payment for that student and month
+  settles it. The money goes from the payer's bank to the tutor's; the app never holds it or takes
+  a share.
+- **Records last.** A student removed from the tuition keeps their payments, shown under "No longer
+  here"; a student who deletes their account leaves their payments under their name.
+- **Limits.** A fee of up to ₹1,00,000 a month and a payment of up to ₹10,00,000, for a month from
+  two years back to next month.
+
+`node tools/fees-test.mjs` checks the rules offline; `node tools/fees-test.ts` checks the routes end
+to end against the local stack and needs migration 039. No real UPI payment has been made from the
+app yet.
+
 ## Hindi, Tamil and other languages
 
 The screens are English; the questions are in whatever language the tutor works in. A paper
@@ -608,8 +780,9 @@ It takes only a developer login, and reads either the live database or dev. It s
   Requests are counted per client from migration 017 on (`api_daily_tuition`).
 
 It changes only a few things: it can sign an account out of one phone, unlock a locked login, and
-handle AI credit (mark a payment received or declined, add credit by hand, and set the prices and
-the UPI details tutors pay to; see "AI credit").
+handle plans and AI credit (mark a plan payment received or declined, give or end a plan by hand,
+set each plan's room, AI and price and where plans are sold, add credit by hand, and set the AI
+prices and the UPI details tutors pay to; see "Plans" and "AI credit").
 Only signed-in requests and logins are counted, since they use the database anyway; the
 notification trigger and anonymous traffic never wake it.
 
@@ -648,7 +821,10 @@ are added to it (`test_notices` records who was told). They get a reminder an ho
 closes if they have not started it
 (only for tests that were open two hours or more; for a shorter one, the first notification
 already gave the closing time). At 8 pm India time the teacher gets a summary of the day, if
-anything happened.
+anything happened. For fees, the tuition's owner is told when a student says they paid by UPI, and
+the student is told when the tutor records a payment for them, confirms theirs or marks it not
+received (`api/src/routes/fees.ts`). Attendance sends no notifications: parents are told through
+the share sheet.
 
 The app registers the phone after logging in and on every start. The registration belongs to
 that login, so logging out stops the notifications on that phone, and a password change stops them
@@ -795,13 +971,22 @@ and the scripts that read it would then point at the live database.
 | `node tools/second-look-test.mjs` | The second look at questions a page read left without their choices (`api/src/lib/second-look.ts`), on the real misread of a photographed book page: which questions are read again (only on a page that is mostly multiple choice; never a question cut by the page edge, an Assertion and Reason question or an unnumbered one), and what is taken from the new read (a whole list of choices that is not another question's, and words only when they hold all of the old). No keys, no database. |
 | `node tools/wholepaper-test.mjs` | The pure parts of reading a paper's pages together (`api/src/lib/wholepaper.ts`): how pages are split into requests, reading a reply that holds several pages, keeping the pages of a reply that was cut off, pages that came back empty or looping, and folding a question's rest on the next page into the question. No keys, no database. |
 | `node tools/passages-test.mjs` | Handing a passage on to the questions at the top of the next page (`api/src/lib/passages.ts`), on the two layouts seen in real papers (a case study whose last question starts the next page, and a passage printed alone at the foot of a page with its graph and questions on the next) and on the layouts that must be left alone: a question of its own that merely comes next, a question that follows on by number but speaks of things the passage never mentions (the next case study's, when its own passage was missed), an Assertion and Reason section or key, a section that numbers afresh, a table question, a section heading. No keys, no database. |
-| `node tools/tenant-test.ts` | 140 checks that tuitions are walled off from each other, and that sign-up, joining, switching, removals, the owner's join code, the rate limits, picture keys and chapters from another tuition, upload sizes and the daily AI cap behave. It makes its own tutors, tuitions and students, and removes them. |
-| `node tools/security-test.ts` | About 930 checks that walk every route the API has (all but deleting a tuition, which `delete-test.ts` covers), found from the app itself: nobody and each role are refused what they should be, a tutor of another tuition can read or change nothing, junk bodies, ids and queries never end in a server error or an unanswered request, the answer key never reaches a student, a new password signs the other phones out, guesses sent all at once are counted one by one, the sign-up and tuition caps hold under a burst, and an oversized body is read away and refused. `--only '<regex>'` fuzzes just the routes whose `METHOD /path` matches. It makes its own data and removes it. Dev only. |
+| `node tools/tenant-test.ts` | 141 checks that tuitions are walled off from each other (their attendance and fees too), and that sign-up, joining, switching, removals, the owner's join code, the rate limits, picture keys and chapters from another tuition, upload sizes and the daily AI cap behave. It makes its own tutors, tuitions and students, and removes them. |
+| `node tools/security-test.ts` | About 1,100 checks that walk every route the API has (all but deleting a tuition, which `delete-test.ts` covers), found from the app itself: nobody and each role are refused what they should be, a tutor of another tuition can read or change nothing, junk bodies, ids and queries never end in a server error or an unanswered request, the answer key never reaches a student, a new password signs the other phones out, guesses sent all at once are counted one by one, the sign-up and tuition caps hold under a burst, and an oversized body is read away and refused. `--only '<regex>'` fuzzes just the routes whose `METHOD /path` matches. It makes its own data and removes it. Dev only. |
 | `node tools/load-test.ts` | A classroom (40 students unless `--students` says otherwise) logs in, opens the home screen, starts a test, saves answers and submits, all at the same moment, then reads the marks: no server errors, one finished attempt each, each marked on its own answers, the marks open for everyone, and a table of how long each step took (the trip from your PC to the database is in those figures). It makes its own data and removes it. Dev only. |
 | `node tools/levels-test.ts` | 47 checks of classes 1 to 12 and the levels a tuition names itself. |
 | `node tools/votes-test.ts` | 55 checks of when AI answers agree enough to mark a question: how a model's reading counts (one option, several, none, hesitant), models of two families, splits, the writer's answer, a split on a paper AI wrote being final, and whose word decides whether a question needs its figure (gpt-oss in the solver's place decides alone, another model only with a checker of another family; a checker that needs the figure still stops a mark). |
 | `node tools/answers-test.ts` | 58 checks of the answers and second-opinion steps with scripted models (the API runs in the process against the dev database, every AI call is answered by a script, no keys or quota needed): a model down, slow or answering junk, two that split or doubt, a partial answer kept, the writer's own answer, a question left "not checked yet" and asked again, and whether a flagged question needs its figure: the solver decides, a group shares its figure box, the tutor's word stands, and a question held for the tutor is asked again a few minutes on when the solver was refused. |
-| `node tools/credit-test.ts` | 83 checks of AI credit end to end: the free start, the price set aside before AI work and charged only for what finishes, a page charged once for each picture of it, two jobs at once never spending the same rupees, AI stopping when the credit runs out, and adding credit (a tutor's "I have paid", the developer marking it received or declined, or adding it by hand). The API runs in the process against the local stack, every AI call answered by a script. It makes its own data, removes it, and puts the credit settings back. Dev only. |
+| `node tools/plans-test.ts` | 124 checks of plans end to end: the sizes and prices the developer sets, a plan on sale only with a price and a UPI id, where plans are sold, "I have paid" and the developer marking it received or declined, months running on, the room each plan has at all seven places that let people in (two at once never taking one place twice), the AI each plan month tops up once even with two jobs at once, a plan that ends, a bigger plan, a plan given or ended by hand, and a tuition that cannot be deleted while a plan payment waits. The API runs in the process against the local stack, every AI call answered by a script. It makes its own data, removes it, and puts the settings back. Dev only. |
+| `node tools/credit-test.ts` | 85 checks of AI credit end to end: the free start, the price set aside before AI work and charged only for what finishes, a page charged once for each picture of it, two jobs at once never spending the same rupees, AI stopping when the credit runs out, credit no longer sold on its own (`plans_only`), and credit from before plans (the developer marking a request received or declined, or adding credit by hand). The API runs in the process against the local stack, every AI call answered by a script. It makes its own data, removes it, and puts the credit settings back. Dev only. |
+| `node tools/solutions-test.mjs` | 68 offline checks of worked solutions (`api/src/lib/solutions.ts`): what the model is asked (never the answer marked), how its reply is read, and which solutions are kept: only one that reaches the marked answer, never one that names an option by its letter. |
+| `node tools/solutions-test.ts` | 61 checks of worked solutions end to end (`api/src/routes/solutions.ts`): a solution kept and charged only when AI's own working reaches the marked answer, the ones it cannot match named and free, a solution that is there never replaced or charged twice, AI stopping when the credit runs out, another tuition's tests out of reach, a new answer taking away AI's solution, and students seeing it only after they hand the test in. The API runs in the process against the local stack, every AI call answered by a script. Needs migration 037. Dev only. |
+| `node tools/attendance-test.mjs` | 34 offline checks of attendance's rules (`api/src/lib/attendance.ts`): India's date, which days a register can be taken for, the month a list of registers covers, who is marked absent, and one student's marks summed up. |
+| `node tools/timetable-test.ts` | 64 checks of the timetable end to end: India's weekday on the server's clock, today's classes and the next one, what is refused (days, start, length, links that are not plain https, a class the tuition has no group for, an eleventh time), adding, listing, changing and taking off times by either tutor, the group's and course's pages, who sees which times (another class, a subject not taken, another course, a place turned off, another tuition), and a removed group, a deleted course and a renamed subject. The API runs in the process against the local stack. It makes its own data and removes it. Dev only. |
+| `node tools/ready-made-test.ts` | 35 checks of ready-made questions end to end: the six books of 830 questions the server carries, what a group is offered (its book, none for a class without one, a group the tuition does not have), adding a book (every question in its chapter, in the book's order, with the proved answer and its worked solution), the picker listing them, adding again (nothing, or only what was deleted, and a tutor's change kept), a chapter the tuition already had, each tuition's own copy, a subject named Mathematics, worked solutions that charge nothing, and students and the signed-out refused. The API runs in the process against the local stack. It makes its own data and removes it. Dev only. |
+| `node tools/attendance-test.ts` | Attendance end to end (`api/src/routes/attendance.ts`): a register for a group or a course, one per class per day (a second tutor updates it), a day that has not come refused, a student not in the class refused, a student who leaves keeping their mark, the group's and course's pages, a student's page, report and own Home, a register taken away, removals, and another tuition reaching none of it. The API runs in the process against the local stack. Needs migration 038. Dev only. |
+| `node tools/fees-test.mjs` | 72 offline checks of fees' rules (`api/src/lib/fees.ts`): months and how far back and ahead they go, money in paise and in rupees, the due day, how and when a payment was made, UPI ids, where a month stands, and a student's months worked out from the fees set and the payments made. |
+| `node tools/fees-test.ts` | Fees end to end (`api/src/routes/fees.ts`): only the owner sees fees; the UPI id; a fee for a group, a list and from next month, and stopped; receipt numbers never given twice; a student's "I have paid" taken back, confirmed, settled by the tutor recording it, or turned down; a payment taken away; the owner's Home and a student's page and Home; payments kept on record by name when a student is removed or deletes their account; and another tuition reaching none of it. The API runs in the process against the local stack. Needs migration 039. Dev only. |
 | `node tools/delete-test.ts` | 42 checks of deleting a tuition: only its owner, only with the owner's password; every row goes; its tutors' accounts go and their logins stop working, while every student keeps theirs (and a tutor with a place elsewhere keeps theirs too); the other tuition is untouched; payments stay on record; storage is emptied. In the process, against the local stack. Dev only. |
 | `node tools/join-links-test.ts` | 88 checks of students making their own logins and joining with a link: signing up with a password or with Google, a tutor's links and what they show to anyone, asking to join with one, letting students in one at a time or all at once, or declining, a new link stopping the old one, the account staying the student's own (turned off, removed, a new password, deleting it), group names worded as the app words them, and tutors no longer making students' logins outside dev. Google is played by a key made for the run, so it needs no network. The API runs in the process against the dev database. It makes its own data and removes it. Dev only. |
 | `node tools/google-test.ts` | 54 checks of Google sign-in's token check (`api/src/lib/google.ts`) and a join link's code, address and page (`api/src/lib/join-links.ts`), with tokens signed by a key made for the run. No database, no network. |
@@ -811,7 +996,7 @@ and the scripts that read it would then point at the live database.
 | `node tools/v180-extras-test.ts` | 135 checks of what app 1.8.0 adds on the server: the update gate (a test already started can still be finished), a test left open for a week (the list on Home, Close the test, Remind the students, and the tutor's notification), Library files in the tutor's own order and the notice to students, renaming any subject, easy, medium and hard levels on questions and drafts, and storage per tuition for the developer's app. The notifications are only seen against the local dry-run API (`--base http://127.0.0.1:8787 --log server.log`); `--ai` also has the AI write a few questions. It makes its own data and removes it. Dev only. |
 | `node tools/text-test.mjs` | Hindi and Tamil text handling, the test writer's answer matching and suggested usernames. |
 | `node tools/summary-test.ts --log server.log` | 7 checks that the evening summary goes to each tuition's own tutors (after 8 pm India time; local API, dry-run push). |
-| `npm run test:api` | 175 end-to-end checks of the marking rules, when results open (closing time, last student, tutor, and which app versions wait), usernames for students who share a name, groups, the home and group pages, tutors, logins, question papers (including ones uploaded before their details are known, printed answer keys that replace AI answers, questions the bank already has, two answer calls at once and question groups) and the admin app's API, against the deployed dev API or the one on this PC (`-- --base http://127.0.0.1:18787`). It logs in with the seed's sample logins, so it never runs against `main`; the admin checks run only where the logins file has a developer login. It creates its own students, subject, tests and paper, gives its tests only to those students, then removes them all. |
+| `npm run test:api` | 179 end-to-end checks of the marking rules, when results open (closing time, last student, tutor, and which app versions wait), usernames for students who share a name, groups, the home and group pages, tutors, logins, question papers (including ones uploaded before their details are known, printed answer keys that replace AI answers, questions the bank already has, two answer calls at once and question groups) and the admin app's API, against the deployed dev API or the one on this PC (`-- --base http://127.0.0.1:18787`). It logs in with the seed's sample logins, so it never runs against `main`; the admin checks run only where the logins file has a developer login. It creates its own students, subject, tests and paper, gives its tests only to those students, then removes them all. |
 | `node tools/notify-test.ts --log server.log` | 25 checks of the notifications against the API on your PC, run with `PUSH_DRY_RUN=1` so each notification is written to the log instead of sent. Dev only. |
 | `node tools/check-answers.ts` | Every sample question's marked answer is right, and no other option equals it. |
 | `node tools/ai-test.ts` | How accurately the AI reads the 2-page sample paper (render it first with `tools/make-sample-paper.ps1`). |
@@ -856,7 +1041,8 @@ Anyone can sign up as a tutor, so each door has a ceiling:
   A student asking to join with a code or a link gets 8 wrong ones an hour. A link's code is 10 random characters
   (about 50 bits), so one group's link cannot be worked out from another's.
 - **AI:** a tuition may start 100 papers and make 500 AI calls (failed ones too) in a day; `AI_DAILY_CALLS`
-  on the function changes the second. Past it the app says the tuition has used its day of AI.
+  on the function changes the second. Past it the app says the tuition has used its day of AI. Worked solutions
+  are asked for four questions to a call, and one is kept only up to 4,000 characters, what the question editor takes.
 - **Pictures:** a picture goes straight to storage. An app from 1.5.0 says how big each picture is and its upload
   URL is signed for exactly that many bytes, which storage enforces (up to 15 MB). Older apps say nothing, so for them
   the server looks at what arrived and throws away anything over 15 MB; `REQUIRE_UPLOAD_SIZE=1` on the function
@@ -969,4 +1155,63 @@ Put the second APK and an `update.json` that describes it in a folder, serve the
 tap Update.
 
 The launcher icon comes from `design/icon/icon.html`; run `.\tools\make-icon.ps1` after
-changing it.
+changing it. It writes the web version's icons in `app/web` too.
+
+## The web version
+
+The same app, built for a browser: tutors and students use it on a computer, or in a phone's
+browser, with the same logins. The build is a folder of plain files that any static host can serve.
+
+```powershell
+.\tools\build-web.ps1 -ApiBase https://<live API address>
+```
+
+writes `app/build/web`; upload everything in it. Add `-BaseHref /app/` when it is served from a
+folder of a site rather than at its own address. Like `release-app.ps1`, it refuses while the
+product's name is the stand-in, and it pins pdf.js (below) with an integrity hash. Before anyone
+opens it:
+
+- **The API must let it in.** Set `CORS_ORIGINS` on the live function to the web version's
+  address, such as `https://app.example.com` (several, comma separated). Without it the browser
+  refuses every request.
+- **So must the file store.** Give the bucket a CORS rule for the same address, allowing GET and PUT
+  with any header: pictures, shelf files and uploads go straight between the browser and the store.
+- **HTTPS only.** The browser keeps the login encrypted with its own cryptography, which it offers
+  only to secure pages.
+- **Caching.** Every build keeps the same file names, so the host must not let browsers keep
+  `index.html`, `flutter_bootstrap.js`, `main.dart.js`, `version.json` or `assets/` without asking
+  again (`Cache-Control: no-cache`); `canvaskit/` can be kept.
+
+To try it on this PC against the local API, build it for `tools/dev-serve.mjs`, start the API with
+the page's address let in, and serve the build:
+
+```powershell
+.\tools\build-web.ps1 -ApiBase http://127.0.0.1:18787 -Local
+```
+```powershell
+$env:CORS_ORIGINS = 'http://127.0.0.1:18790'; node tools/dev-serve.mjs
+```
+```powershell
+node tools/serve-web.mjs
+```
+
+then open http://127.0.0.1:18790 (that address exactly: `localhost` is a different origin).
+
+Where it differs from the Android app:
+
+- **No pushes.** The web build has no Firebase; its screens check for news by themselves.
+- **No Google sign-in yet.** Google's library signs in on the web only through Google's own
+  button, with a web client from the startup's Google project. Username and password work.
+- **Students can take screenshots.** A browser cannot block them as the app does.
+- **No self-update.** A browser loads the newest version from the host each time.
+- **Files.** On a computer, a receipt, report, printed test or QR code is downloaded; a phone's
+  browser offers its share sheet. Shelf files open in a new tab.
+- **UPI.** A computer has no UPI app, so a student there pays by scanning the code with a phone; an
+  Android phone's browser hands the payment to a UPI app as the app does.
+- **Wide screens.** On a computer (and on a tablet, in the Android app too) the app keeps to a
+  720-wide column in the middle instead of stretching across the screen.
+- **A reload stays on the page.** The app starts again and returns to where it was.
+- **Other sites.** The page loads letters for Hindi, Tamil and other scripts from Google's font
+  server, Google's sign-in library (the sign-in package loads it although it is not used in a
+  browser), and pdf.js from jsDelivr, which turns a question paper's PDF into page pictures. The
+  privacy policy says so. Serving pdf.js from the app's own host would remove jsDelivr.

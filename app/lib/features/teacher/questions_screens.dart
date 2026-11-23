@@ -117,6 +117,11 @@ class _QuestionEditorState extends State<QuestionEditor> {
   PlainBaseline _bSolution = PlainBaseline();
   num _marks = 1;
 
+  /// Whether the solution is the one AI wrote (the server's routes/solutions.ts), and the answer it was kept for: AI's working
+  /// reached that answer. Changing the solution makes it the tutor's; changing the answer has it removed on saving.
+  bool _solutionByAi = false;
+  int? _answerSolved;
+
   /// How hard the question is: Medium for a new one. Whether AI chose it and she has not looked at it, and whether she picked one here.
   Difficulty _difficulty = Difficulty.medium;
   bool _aiChose = false;
@@ -190,6 +195,8 @@ class _QuestionEditorState extends State<QuestionEditor> {
       _subjectId = q['subject_id'] as String?;
       _chapterId = q['chapter_id'] as String?;
       _correct = q['correct_option'] as int;
+      _solutionByAi = q['solution_by_ai'] == true;
+      _answerSolved = _correct;
       _marks = q['marks'] as num;
       _difficulty = difficultyOf(q['difficulty']);
       _aiChose = aiChose(q);
@@ -472,7 +479,7 @@ class _QuestionEditorState extends State<QuestionEditor> {
           Stack(children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(rSmall),
-              child: _imageBytes != null ? Image.memory(_imageBytes!) : Image.network(_imageUrl!),
+              child: _imageBytes != null ? Image.memory(_imageBytes!) : Image.network(_imageUrl!, webHtmlElementStrategy: WebHtmlElementStrategy.fallback),
             ),
             Positioned(
               top: 8,
@@ -490,6 +497,17 @@ class _QuestionEditorState extends State<QuestionEditor> {
         GroupedInputs(children: [
           BareField(controller: _solution, focusNode: _focus[maxOptions + 1], placeholder: 'Shown to students after they submit', maxLines: null, minLines: 2, maxLength: 4000, capitalization: TextCapitalization.sentences),
         ]),
+        // The solution AI wrote, while it is still AI's: it reached the answer marked, and stops fitting when that changes.
+        if (_solutionByAi && _solution.text == _bSolution.initial && _solution.text.trim().isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _correct == _answerSolved
+              ? Fig('Written by AI, whose own working reached the answer marked. Change it as you like.', style: labelStyle.copyWith(fontSize: 12, height: 1.4))
+              : InlineNotice(
+                  'AI wrote this solution for the answer marked before, so it is removed when you save. '
+                  "AI can write one for the new answer from the test's page.",
+                  icon: Ph.warning,
+                ),
+        ],
         const FormLabel('Marks'),
         ChipRow(padding: EdgeInsets.zero, children: [
           for (final m in [1, 2, 3, 4, 5]) SegChip('$m', selected: _marks == m, onTap: () => setState(() => _marks = m)),

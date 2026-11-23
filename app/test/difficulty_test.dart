@@ -24,7 +24,7 @@ Map<String, dynamic> _q(String id, String text, {String? chapter, String? level,
     {'id': id, 'text': text, 'chapter': chapter, 'difficulty': level, 'difficulty_by': by, 'source': source};
 
 /// 10th Maths: eight questions of the tutor's (3 easy, 2 medium, 3 hard; one has no level at all, as every question did before levels
-/// existed) and one from the ready-made library, which the picker never offers.
+/// existed) and one from the ready-made books, which the picker lists with the rest, marked Ready-made.
 List<Map<String, dynamic>> _bank() => [
       _q('q1', 'Value of sin 30', chapter: 'Trigonometry', level: 'easy', by: 'ai'),
       _q('q2', 'Value of tan 45', chapter: 'Trigonometry', level: 'easy', by: 'tutor'),
@@ -430,8 +430,10 @@ void main() {
       expect(find.text('Choose questions'), findsWidgets);
       expect(_chips(t), [
         Difficulty.easy, Difficulty.easy, Difficulty.hard, Difficulty.easy, Difficulty.medium, Difficulty.hard, Difficulty.medium, Difficulty.hard,
-      ], reason: 'in the order the server sent them, without the ready-made question');
-      expect(find.text('A ready-made question'), findsNothing);
+        Difficulty.hard,
+      ], reason: 'in the order the server sent them, the ready-made question too');
+      expect(find.text('A ready-made question'), findsOneWidget);
+      expect(find.text('Ready-made'), findsOneWidget, reason: 'it has no chapter, so its row says only where it came from');
     });
 
     testWidgets('the level is a filter of its own, beside the chapters, and starts on all of them', (t) async {
@@ -446,17 +448,17 @@ void main() {
       await _openPicker(t);
       await _tap(t, find.text('All levels'));
       expect(find.text('Level'), findsOneWidget);
-      expect(_card(t, _levels), {'All levels': '', 'Easy': '3', 'Medium': '2', 'Hard': '3'});
+      expect(_card(t, _levels), {'All levels': '', 'Easy': '3', 'Medium': '2', 'Hard': '4'});
     });
 
     testWidgets('choosing Hard lists only the hard questions, and the filter says so', (t) async {
       await _openPicker(t);
       await _filterTo(t, 'Hard');
-      expect([for (final x in ['Prove an identity', 'Prove that root 2 is irrational', 'Sum of the roots']) find.text(x).evaluate().length], [1, 1, 1]);
+      expect([for (final x in ['Prove an identity', 'Prove that root 2 is irrational', 'Sum of the roots', 'A ready-made question']) find.text(x).evaluate().length], [1, 1, 1, 1]);
       expect(find.text('Value of sin 30'), findsNothing);
       expect(find.text('Zeros of a polynomial'), findsNothing);
       expect(find.text('All levels'), findsNothing);
-      expect(_chips(t), [Difficulty.hard, Difficulty.hard, Difficulty.hard]);
+      expect(_chips(t), [Difficulty.hard, Difficulty.hard, Difficulty.hard, Difficulty.hard]);
     });
 
     testWidgets('Medium takes in a question that was never given a level', (t) async {
@@ -502,16 +504,16 @@ void main() {
       expect(_chips(t).length, 3);
       await _tap(t, find.text('Easy').first);
       await _tap(t, find.text('All levels').last);
-      expect(_chips(t).length, 8);
+      expect(_chips(t).length, 9);
     });
 
     testWidgets('"Add all" takes in what is shown, at that level', (t) async {
       await _openPicker(t);
       expect(find.textContaining('Add all'), findsNothing, reason: 'nothing narrowed yet');
       await _filterTo(t, 'Hard');
-      await _tap(t, find.text('Add all 3 shown'));
-      expect(find.text('Use 3 questions'), findsOneWidget);
-      expect(find.text('3 hard'), findsOneWidget);
+      await _tap(t, find.text('Add all 4 shown'));
+      expect(find.text('Use 4 questions'), findsOneWidget);
+      expect(find.text('4 hard'), findsOneWidget);
       expect(find.textContaining('Add all'), findsNothing, reason: 'all of them are in');
     });
 
@@ -574,7 +576,7 @@ void main() {
       expect(t.takeException(), isNull);
       await _tap(t, find.text('Hard').last);
       expect(t.takeException(), isNull);
-      await _tap(t, find.text('Add all 3 shown'));
+      await _tap(t, find.text('Add all 4 shown'));
       expect(t.takeException(), isNull);
     });
   });

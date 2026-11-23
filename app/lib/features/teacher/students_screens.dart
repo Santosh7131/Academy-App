@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/api.dart';
 import '../../core/changes.dart';
+import '../../core/credit.dart' show inrWhole;
+import '../../core/fees.dart';
 import '../../core/format.dart' as f;
 import '../../theme.dart';
 import '../../ui/kit.dart';
@@ -155,6 +157,63 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsB
     }
   }
 
+  /// The student's attendance, on the same registers as the results above (a course's from its page, the groups' from a group's).
+  /// Nothing shows until a register with this student on it has been taken.
+  List<Widget> _attendance(Object? a) {
+    final m = a is Map ? a.cast<String, dynamic>() : null;
+    final classes = (m?['classes'] as num?)?.toInt() ?? 0;
+    if (m == null || classes == 0) return const [];
+    final here = (m['present'] as num?)?.toInt() ?? 0;
+    final away = ((m['absent_days'] as List?) ?? const []).map((x) => '$x').toList();
+    final shown = away.take(3).map((x) => f.shortDate(f.dayOf(x))).join(', ');
+    return [
+      const SizedBox(height: gapRow),
+      RowTile(
+        leading: Icon(Ph.listChecks, size: 22, color: ink),
+        title: 'Here at $here of ${f.count(classes, 'class', 'classes')} · ${f.percent(here / classes)}',
+        meta: away.isEmpty ? 'Not away once' : 'Away $shown${away.length > 3 ? ' and ${f.count(away.length - 3, 'more day', 'more days')}' : ''}',
+      ),
+    ];
+  }
+
+  /// The student's fee and what they still owe. Only the owner sees fees, so the page has none for a helper tutor, nor from a
+  /// course's page. A tap opens their fees, to record a payment or remind the parents.
+  List<Widget> _fee(Object? v, Map<String, dynamic> s) {
+    if (v is! Map) return const [];
+    final m = v.cast<String, dynamic>();
+    final fee = m['fee'] == null ? null : paiseOf(m['fee']);
+    final owing = [for (final x in (m['owing'] as List?) ?? const []) Map<String, dynamic>.from(x as Map)];
+    final unpaid = owing.where((x) => x['status'] == 'unpaid').toList();
+    final month = m['month'] is Map ? (m['month'] as Map).cast<String, dynamic>() : null;
+    String meta;
+    Color? color;
+    if (fee == null && m['set'] != true) {
+      meta = 'Set a monthly fee';
+    } else if (unpaid.isNotEmpty) {
+      meta = '${inrWhole(paiseOf(m['left']))} to pay for ${monthsList([for (final x in unpaid) '${x['month']}'])}';
+      if (unpaid.any((x) => x['late'] == true)) color = danger;
+    } else if (owing.isNotEmpty) {
+      meta = 'A payment to confirm';
+      color = warning;
+    } else if (month != null && month['status'] == 'paid') {
+      meta = '${monthName('${month['month']}')} is paid';
+      color = success;
+    } else {
+      meta = 'Nothing owed';
+    }
+    return [
+      const SizedBox(height: gapRow),
+      RowTile(
+        leading: Icon(Ph.currencyInr, size: 22, color: ink),
+        title: fee == null ? 'Fees' : '${inrWhole(fee)} a month',
+        meta: meta,
+        metaColor: color,
+        chevron: true,
+        onTap: () => context.push('/t/fees/students/${widget.id}?name=${Uri.encodeComponent('${s['display_name']}')}'),
+      ),
+    ];
+  }
+
   /// The student's actions, kept off the page: change subjects, turn them off here, remove them from the tuition. The
   /// account is the student's own, so nothing here changes their password.
   Future<void> _menu(Map<String, dynamic> s, int written) async {
@@ -270,6 +329,17 @@ class _StudentDetailScreenState extends State<StudentDetailScreen> with WidgetsB
                 '${lastSeen == null ? '' : ' · last seen ${f.relative(lastSeen)}'}',
           ),
         ),
+        ..._attendance(d['attendance']),
+        ..._fee(d['fee'], Map<String, dynamic>.from(d['student'] as Map)),
+        const SizedBox(height: gapRow),
+        // A picture of the month for the parents, to send on WhatsApp (parent_report.dart).
+        SecondaryButton('Report for parents', icon: Ph.chartBar, onTap: () {
+          final q = {
+            if (widget.courseId != null) 'course': widget.courseId!,
+            if (widget.courseName != null && widget.courseName!.isNotEmpty) 'name': widget.courseName!,
+          };
+          context.push(Uri(path: '/t/students/${widget.id}/report', queryParameters: q.isEmpty ? null : q).toString());
+        }),
         if (chapters.isNotEmpty) ...[
           SectionRule(
             _allChapters ? 'Chapters' : 'Weakest chapters',

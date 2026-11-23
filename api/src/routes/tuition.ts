@@ -11,12 +11,13 @@ import { subjectIds } from '../lib/subjects.ts';
 import { ensureGroup, freeJoinCode, showCode, taughtSubjectIds } from '../lib/tuition.ts';
 import { readBody } from './body.ts';
 import { LINK_REQUESTS } from './links.ts';
+import { effectivePlan, roomFor } from '../lib/plans.ts';
 
 // A tutor's own tuition: its name, the code students join with, and the students asking to join.
 // Mounted with the teacher routes, behind requireUser('teacher').
 export const tuitionRoutes = new Hono<AppEnv>();
 
-const TUITION = `select t.id, t.name, t.join_code, t.join_open, t.plan, t.plan_until, t.created_at,
+const TUITION = `select t.id, t.name, t.join_code, t.join_open, ${effectivePlan('t')} as plan, t.plan_until::text as plan_until, t.created_at,
        (select count(*) from memberships m where m.tuition_id = t.id and m.role = 'student' and m.status = 'active') as students,
        (select count(*) from memberships m where m.tuition_id = t.id and m.role in ('owner', 'tutor') and m.status = 'active') as tutors,
        (select count(*) from groups g where g.tuition_id = t.id) as groups,
@@ -83,6 +84,13 @@ tuitionRoutes.post('/tuition/delete', async (c) => {
   const gone = await tx(async (cx) => {
     const row = await q1<{ name: string }>('select name from tuitions where id = $1 for update', [T], cx);
     if (!row) throw notFound('The tuition');
+    // A plan payment still waiting would go with the tuition, leaving the developer with money in their UPI app and nothing to match
+    // it to. Checked under the tuition's lock, so none can be sent in between. Once it is received (it then stays on record under
+    // the tuition's name) or declined, the tuition can go.
+    const planWaiting = await q1('select 1 from plan_requests where tuition_id = $1 and status = $2 limit 1', [T, 'waiting'], cx);
+    if (planWaiting) {
+      throw new HttpError(409, 'plan_payment_waiting', 'A payment for a plan is still waiting to be checked. The tuition can be deleted once it has been checked.');
+    }
     // Who was really in it, taken before the memberships go: only these people can lose their accounts. Someone whose only link
     // to the tuition is a request still waiting was never let in, so its owner has no say over their account.
     const members = (await q<{ user_id: string }>(
@@ -153,6 +161,8 @@ tuitionRoutes.post('/join-requests/:id/accept', async (c) => {
   const subjects = 'subject_ids' in b ? subjectIds(b.subject_ids) : [];
   await taughtSubjectIds(t.id, subjects);
   const m = await tx(async (cx) => {
+    // Letting a student in takes room on the tuition's plan (lib/plans.ts).
+    await roomFor(cx, t.id, 'student', id);
     const row = await tq1<{ class_level: number | null }>(
       t.id,
       `update memberships set status = 'active', class_level = coalesce($2, class_level)

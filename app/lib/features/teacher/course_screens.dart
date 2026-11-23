@@ -5,9 +5,12 @@ import '../../core/api.dart';
 import '../../core/changes.dart';
 import '../../core/format.dart' as f;
 import '../../core/levels.dart';
+import '../../core/timetable.dart';
 import '../../core/library.dart';
 import '../../theme.dart';
 import '../../ui/kit.dart';
+import 'attendance_screens.dart';
+import 'timetable_screens.dart';
 import 'common.dart';
 import 'library_tab.dart';
 import 'make_test.dart';
@@ -234,6 +237,19 @@ class _CourseScreenState extends State<CourseScreen> with WidgetsBindingObserver
       Align(alignment: Alignment.centerLeft, child: _RenameLink(onTap: _rename)),
       const SizedBox(height: 10),
       PrimaryButton('Make tests', leadingIcon: Ph.plus, onTap: _makeTest),
+      // A server from before attendance sends no attendance_today, and the button stays away.
+      if (d.containsKey('attendance_today')) ...[
+        const SizedBox(height: 10),
+        AttendanceButton(
+          today: (d['attendance_today'] as Map?)?.cast<String, dynamic>(),
+          onTap: () => _go(ClassRef.course(widget.id).link(_name)),
+        ),
+      ],
+      // The course's timetable; a server from before it sends no times, and the button stays away.
+      if (d.containsKey('times')) ...[
+        const SizedBox(height: 10),
+        TimetableButton(times: ClassTime.list(d['times']), onTap: () => _go(timetableLink(ClassRef.course(widget.id), _name))),
+      ],
       const SizedBox(height: 18),
       SegmentedToggle(
         labels: const ['Tests', 'Library', 'People'],

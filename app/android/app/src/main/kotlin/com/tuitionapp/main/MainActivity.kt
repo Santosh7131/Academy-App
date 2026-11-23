@@ -39,6 +39,10 @@ class MainActivity : FlutterActivity() {
         }
         // Saving a downloaded Library file into the Downloads folder: see Files.kt and lib/core/library.dart.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, Files.CHANNEL).setMethodCallHandler { call, result -> Files.handle(this, call, result) }
+        // Paying a fee in a UPI app: see Upi.kt and lib/core/upi.dart.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, Upi.CHANNEL).setMethodCallHandler { call, result -> Upi.handle(this, call, result) }
+        // Joining a class online from the timetable: see Links.kt and lib/core/links.dart.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, Links.CHANNEL).setMethodCallHandler { call, result -> Links.handle(this, call, result) }
         // In-app updates: see Updater.kt and lib/core/updater.dart.
         val updates = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, Updater.CHANNEL)
         updates.setMethodCallHandler { call, result -> Updater.handle(this, call, result) }

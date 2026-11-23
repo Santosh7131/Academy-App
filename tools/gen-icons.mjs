@@ -21,6 +21,8 @@ const names = [
   'hourglassMedium', 'bellRinging', 'lockSimple', 'chartBarHorizontal', 'bank', 'arrowClockwise', 'imageSquare',
   // AI credit.
   'coins', 'pencilSimpleLine',
+  // Fees: the rupee, a receipt, and paying in a UPI app.
+  'currencyInr', 'receipt', 'arrowSquareOut',
 ];
 
 // The developer's admin app (admin/).

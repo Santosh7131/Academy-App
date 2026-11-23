@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 /// What a screen shows, so a change elsewhere in the app can tell it to load again.
-enum Area { tests, students, questions, papers, settings, student, courses, library, credit }
+enum Area { tests, students, questions, papers, settings, student, courses, library, credit, fees }
 
 /// The areas a successful write to [path] changes.
 Set<Area> areasOf(String path) {
@@ -16,9 +16,17 @@ Set<Area> areasOf(String path) {
   // A course's people are students too; its tests, papers and questions have their own writes above.
   if (p.startsWith('/teacher/courses')) return {Area.courses, Area.students, Area.tests};
   if (p.startsWith('/teacher/students')) return {Area.students, Area.courses};
-  if (p.startsWith('/teacher/questions') || p.startsWith('/teacher/uploads')) return {Area.questions};
+  // A register taken shows on the class's page and on each student's.
+  if (p.startsWith('/teacher/attendance')) return {Area.students, Area.courses};
+  // A class time shows on the class's page.
+  if (p.startsWith('/teacher/class-times')) return {Area.students, Area.courses};
+  // Fees show on the Fees screens, on each student's page and on Home.
+  if (p.startsWith('/teacher/fees')) return {Area.fees, Area.students};
+  if (p.startsWith('/teacher/questions') || p.startsWith('/teacher/uploads') || p.startsWith('/teacher/ready-made')) return {Area.questions};
   // AI credit: asking for more, and the AI work that spends it (reading a page, writing questions).
   if (p.startsWith('/teacher/credit')) return {Area.credit};
+  // Plans: a payment for one waits on the plan screen, beside the AI it gives.
+  if (p.startsWith('/teacher/plan')) return {Area.credit};
   // Saving a paper puts its questions in the bank.
   if (p.startsWith('/teacher/papers') || p.startsWith('/teacher/drafts')) {
     return {Area.papers, if (p.endsWith('/save')) Area.questions, if (p.endsWith('/read') || p == '/teacher/papers/chat') Area.credit};

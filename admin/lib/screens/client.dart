@@ -213,6 +213,9 @@ class _ClientScreenState extends State<ClientScreen> with WidgetsBindingObserver
           const SizedBox(height: 18),
           ClientCredit(clientId: widget.id, clientName: '${c['name']}', credit: credit, aiWorthInr: cost, onChanged: _load),
         ],
+        // The plan: how much room the client has, and whether it is paid for.
+        const SizedBox(height: 18),
+        ClientPlan(clientId: widget.id, clientName: '${c['name']}', onChanged: _load),
         const SizedBox(height: 18),
         StatGrid(
           label: 'Students',

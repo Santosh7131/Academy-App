@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
-import 'package:share_plus/share_plus.dart';
 
 import '../../core/api.dart';
 import '../../core/brand.dart';
+import '../../core/share_text.dart';
 import '../../theme.dart';
 import '../../ui/kit.dart';
 
@@ -86,7 +86,9 @@ class _ShareCodeScreenState extends State<ShareCodeScreen> {
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: PrimaryButton('Share', icon: Ph.shareNetwork, onTap: () => SharePlus.instance.share(ShareParams(text: _message))),
+              child: PrimaryButton('Share', icon: Ph.shareNetwork, onTap: () async {
+                if (await shareText(_message) && mounted) setState(() => _notice = copiedNotice);
+              }),
             ),
           ]),
           if (_notice != null) ...[const SizedBox(height: 14), InlineNotice(_notice!, tone: Tone.success, icon: Ph.checkCircle)],

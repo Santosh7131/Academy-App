@@ -1397,7 +1397,7 @@ class _PaperReviewScreenState extends State<PaperReviewScreen> with WidgetsBindi
             InlineNotice(_aiError!, tone: _noCredit ? Tone.warning : Tone.danger, icon: _noCredit ? Ph.coins : Ph.warning),
             const SizedBox(height: 10),
             if (_noCredit) ...[
-              PrimaryButton('Add credit', leadingIcon: Ph.plus, onTap: () => context.push('/t/credit/add')),
+              PrimaryButton('See plans', onTap: () => context.push('/t/plan')),
               const SizedBox(height: 10),
             ],
             SecondaryButton('Try again', icon: Ph.arrowsClockwise, onTap: _run),
@@ -1659,7 +1659,7 @@ class _PagesStrip extends StatelessWidget {
                   decoration: surface(radius: 10, shadow: e1),
                   clipBehavior: Clip.antiAlias,
                   // Decoded at the size of the thumbnail: a whole page is some 15 MB once decoded, and a paper of twelve pages would hold them all.
-                  child: pg['image_url'] == null ? null : Image.network('${pg['image_url']}', fit: BoxFit.cover, cacheWidth: 192, errorBuilder: (_, _, _) => const SizedBox()),
+                  child: pg['image_url'] == null ? null : Image.network('${pg['image_url']}', fit: BoxFit.cover, cacheWidth: 192, webHtmlElementStrategy: WebHtmlElementStrategy.fallback, errorBuilder: (_, _, _) => const SizedBox()),
                 ),
                 Positioned(right: 5, bottom: 5, child: TagChip('${pg['page_no']}')),
                 if ((issues[pg['page_no'] as int] ?? 0) > 0)

@@ -47,6 +47,9 @@ class Session extends ChangeNotifier {
   /// The person signed in on this phone with Google, so they have no password to type: deleting the account asks Google again.
   bool get signedInWithGoogle => _prefs.getString('signed_in_with') == 'google';
   bool get isTeacher => user?['role'] == 'teacher';
+
+  /// The owner of the tuition on screen: only the owner sees fees.
+  bool get isOwner => activeTuition?['role'] == 'owner';
   String get firstName => '${user?['display_name'] ?? ''}'.trim().split(RegExp(r'\s+')).first;
 
   Iterable<Map<String, dynamic>> get activeTuitions => tuitions.where((t) => t['status'] == 'active');

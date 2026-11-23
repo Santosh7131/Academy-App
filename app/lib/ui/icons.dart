@@ -88,4 +88,7 @@ abstract final class Ph {
   static const imageSquare = IconData(0xe2cc, fontFamily: _family);
   static const coins = IconData(0xe78e, fontFamily: _family);
   static const pencilSimpleLine = IconData(0xebc6, fontFamily: _family);
+  static const currencyInr = IconData(0xe558, fontFamily: _family);
+  static const receipt = IconData(0xe3ec, fontFamily: _family);
+  static const arrowSquareOut = IconData(0xe5de, fontFamily: _family);
 }

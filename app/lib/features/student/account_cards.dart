@@ -96,7 +96,7 @@ Future<void> deleteAccountFlow(BuildContext context) async {
   final ok = await confirmCard(
     context,
     title: 'Delete your account?',
-    body: 'Your login, your places in your tuitions and all your results go for good. This cannot be undone.',
+    body: 'Your login, your places in your tuitions and all your results go for good. Any fee payments your tutors noted stay in their records under your name. This cannot be undone.',
     confirm: 'Continue',
     destructive: true,
   );

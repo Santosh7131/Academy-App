@@ -32,16 +32,30 @@ class SettingsScreen extends StatelessWidget {
             const SectionRule('AI credit', padding: _rule),
             RowTile(
               title: 'Prices and payment details',
-              meta: 'What tutors pay, the free credit to start, the UPI id',
+              meta: 'What AI work costs, the free credit to start, the UPI id plans are paid to',
               chevron: true,
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CreditSettingsScreen())),
             ),
             const SizedBox(height: gapRow),
             RowTile(
               title: 'Credit requests',
-              meta: 'Payments to check in your UPI app',
+              meta: 'Payments for credit on its own, from before plans',
               chevron: true,
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CreditRequestsScreen())),
+            ),
+            const SectionRule('Plans', padding: _rule),
+            RowTile(
+              title: 'Plans',
+              meta: 'Room for students and tutors, AI each month, prices, where they are sold',
+              chevron: true,
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlanSettingsScreen())),
+            ),
+            const SizedBox(height: gapRow),
+            RowTile(
+              title: 'Plan payments',
+              meta: 'Payments to check in your UPI app',
+              chevron: true,
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlanRequestsScreen())),
             ),
             const SectionRule('Theme', padding: _rule),
             Wrap(spacing: 8, children: [

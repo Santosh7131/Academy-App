@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../core/api.dart';
 import '../core/auto_refresh.dart';
@@ -7,6 +8,8 @@ import '../core/format.dart' as f;
 import '../theme.dart';
 import '../ui/common.dart';
 import '../ui/kit.dart';
+
+part 'plans.dart';
 
 // The AI credit, the developer's side (design/comps/w1a-*): the payments waiting to be checked against the UPI app, the prices and
 // payment details tutors see, and the credit on a client's page. Amounts stay whole paise from end to end, never a fraction of a rupee
@@ -43,9 +46,11 @@ String ledgerTitle(Map<String, dynamic> l) {
   return switch ('${l['kind']}') {
     'page' => about('Read ${f.plural(f.asInt(l['pages']), 'page')}'),
     'questions' => about('Wrote ${f.plural(f.asInt(l['questions']), 'question')}'),
+    'solutions' => about('Wrote ${f.plural(f.asInt(l['solutions']), 'worked solution')}'),
     'start' => 'Free credit to start',
     'topup' => 'Credit added · UPI',
     'by_hand' => 'Credit added by hand',
+    'plan' => about('AI for the month'),
     final other => other,
   };
 }
@@ -196,8 +201,11 @@ class _RupeeField extends StatelessWidget {
 /// The card that marks a payment received: what to check first, and the UPI transaction id to keep with it, if wanted.
 /// Pops with the reference ('' for none), or nothing when cancelled.
 class _ReceiveCard extends StatefulWidget {
-  const _ReceiveCard({required this.code});
+  const _ReceiveCard({required this.code, this.effect = 'The credit goes to the client at once'});
   final String code;
+
+  /// What marking it received does, said before "and this can't be undone".
+  final String effect;
 
   @override
   State<_ReceiveCard> createState() => _ReceiveCardState();
@@ -214,8 +222,8 @@ class _ReceiveCardState extends State<_ReceiveCard> {
 
   @override
   Widget build(BuildContext context) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Fig("Find this payment in your UPI app first: its note should say ${widget.code}. The credit goes to the client at once, "
-            "and this can't be undone.", style: bodyStyle),
+        Fig("Find this payment in your UPI app first: its note should say ${widget.code}. ${widget.effect}, and this can't be undone.",
+            style: bodyStyle),
         const SizedBox(height: 16),
         const _FieldLabel('UPI transaction id, to keep with it'),
         _Box(child: BareField(controller: _ref, placeholder: 'Optional', maxLength: 80, action: TextInputAction.done)),
@@ -419,7 +427,7 @@ class _CreditRequestsScreenState extends State<CreditRequestsScreen> with Widget
             style: bodyStyle.copyWith(color: muted)),
         SectionRule('Waiting', count: waiting.length, padding: _rule),
         if (waiting.isEmpty)
-          Fig('Nothing waiting. A request shows here when a tutor asks to add credit.', style: bodyStyle.copyWith(color: muted))
+          Fig('Nothing waiting. Tutors now buy plans, not credit on its own: their payments are under Plan payments.', style: bodyStyle.copyWith(color: muted))
         else
           ...[
             for (final (i, r) in waiting.indexed) ...[
@@ -584,7 +592,7 @@ class _CreditSettingsScreenState extends State<CreditSettingsScreen> {
     if (v == null || v == now || !mounted) return;
     if (upi && v.isEmpty) {
       final yes = await confirmCard(context,
-          title: 'Remove the UPI id?', body: 'No tutor can add credit until you set one again.', confirm: 'Remove', destructive: true);
+          title: 'Remove the UPI id?', body: 'No tutor can buy a plan until you set one again.', confirm: 'Remove', destructive: true);
       if (!yes) return;
     }
     await _save(key, v);
@@ -602,12 +610,14 @@ class _CreditSettingsScreenState extends State<CreditSettingsScreen> {
     final month = Map<String, dynamic>.from(d['month'] as Map);
     final pageCost = month['page_cost_inr'];
     final questionCost = month['question_cost_inr'];
+    final solutionCost = month['solution_cost_inr'];
     final upiId = '${s['upi_id'] ?? ''}';
     final upiName = '${s['upi_name'] ?? ''}';
     final newAi = s['new_clients_ai'] == true;
     final costs = [
       if (pageCost != null) '${f.rupees(f.asDouble(pageCost))} a page',
       if (questionCost != null) '${f.rupees(f.asDouble(questionCost))} a question',
+      if (solutionCost != null) '${f.rupees(f.asDouble(solutionCost))} a worked solution',
     ];
     return PushedPanel(
       kicker: 'Admin · Settings',
@@ -615,7 +625,7 @@ class _CreditSettingsScreenState extends State<CreditSettingsScreen> {
       onRefresh: _load,
       children: [
         const SizedBox(height: 10),
-        Fig('What tutors pay for AI work. Tutors see these prices and the UPI id in their app.', style: bodyStyle.copyWith(color: muted)),
+        Fig("What AI work takes from a tuition's credit, which Basic and Pro give each month. Tutors pay for plans to the UPI id here.", style: bodyStyle.copyWith(color: muted)),
         SectionRule('Prices', padding: _rule),
         _Facts([
           _Fact('Reading a page', f.inr(f.asInt(s['page_paise'])),
@@ -623,10 +633,16 @@ class _CreditSettingsScreenState extends State<CreditSettingsScreen> {
           _Fact('Writing a question', f.inr(f.asInt(s['question_paise'])),
               busy: _saving == 'question_paise',
               onTap: () => _editAmount('question_paise', 'Price of a question', _priceNote, most: _mostPrice)),
+          // A server before worked solutions has no price for one.
+          if (s['solution_paise'] != null)
+            _Fact('Writing a worked solution', f.inr(f.asInt(s['solution_paise'])),
+                busy: _saving == 'solution_paise',
+                onTap: () => _editAmount('solution_paise', 'Price of a worked solution', _priceNote, most: _mostPrice)),
         ]),
         if (costs.isNotEmpty) ...[
           const SizedBox(height: 10),
-          Fig('It costs you about ${costs.join(' and ')} this month, at list prices.', style: labelStyle),
+          Fig('It costs you about ${costs.length < 2 ? costs.join() : '${costs.take(costs.length - 1).join(', ')} and ${costs.last}'} this month, at list prices.',
+              style: labelStyle),
         ],
         SectionRule('New clients', padding: _rule),
         _Facts([
@@ -638,13 +654,13 @@ class _CreditSettingsScreenState extends State<CreditSettingsScreen> {
         const SizedBox(height: gapRow),
         _SwitchRow(
           title: 'New clients can use AI',
-          body: 'Turn off to give new clients no free credit: they can use AI once they buy credit or you add some.',
+          body: 'Turn off to give new clients no free credit: they can use AI once they buy a plan or you add some.',
           on: newAi,
           onTap: _saving == null ? () => _save('new_clients_ai', !newAi) : null,
         ),
         SectionRule('Payment details', padding: _rule),
         if (upiId.isEmpty) ...[
-          InlineNotice('No UPI id is set, so no tutor can add credit.', icon: Ph.warning),
+          InlineNotice('No UPI id is set, so no tutor can buy a plan.', icon: Ph.warning),
           const SizedBox(height: gapRow),
         ],
         _Facts([

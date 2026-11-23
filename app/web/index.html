@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <!-- The address the app is served from. flutter build web sets it from --base-href (tools/build-web.ps1 passes it). -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <title>Tuition Tests</title>
+  <meta name="description" content="Tuition Tests in your browser: tests from your own question papers, marked the moment students hand in.">
+  <meta name="theme-color" content="#FAFAFB" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0C0C0F" media="(prefers-color-scheme: dark)">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Tuition Tests">
+  <link rel="apple-touch-icon" href="icons/Icon-apple-180.png">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <link rel="manifest" href="manifest.json">
+
+  <style>
+    html, body { margin: 0; height: 100%; background: #FAFAFB; }
+    @media (prefers-color-scheme: dark) { html, body { background: #0C0C0F; } }
+    /* Shown, still, until the app has drawn itself (flutter_bootstrap.js removes it). */
+    #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+    #loading img { width: 72px; height: 72px; }
+    noscript p { font: 16px/1.5 system-ui, sans-serif; color: #3A3A42; max-width: 28em; margin: 30vh auto 0; padding: 0 24px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div id="loading"><img src="icons/Icon-192.png" alt=""></div>
+  <noscript><p>Tuition Tests needs JavaScript. Turn it on in your browser's settings, then open this page again.</p></noscript>
+
+  <!-- PDF pages: a tutor's question paper is split into page pictures in the browser by pdf.js, which the pdfx package asks for
+       here (its version is the one pdfx 2.11 names in bin/install_web.dart). -->
+  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.min.mjs" type="module"></script>
+  <script type="module">
+    globalThis.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/build/pdf.worker.mjs';
+    globalThis.pdfRenderOptions = { cMapUrl: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.6.82/cmaps/', cMapPacked: true };
+  </script>
+
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

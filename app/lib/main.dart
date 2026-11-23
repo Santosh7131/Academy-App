@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -29,6 +30,8 @@ Future<void> main() async {
 /// A phone turned on its side has too little height for a question and its buttons, or for a form with the
 /// keyboard open, so phones stay upright. A tablet turns freely.
 Future<void> _keepPhonesUpright() async {
+  // A browser turns its pages as it likes; a page cannot lock it.
+  if (kIsWeb) return;
   final view = PlatformDispatcher.instance.views.first;
   if (view.physicalSize.shortestSide / view.devicePixelRatio < 600) {
     await SystemChrome.setPreferredOrientations(const [DeviceOrientation.portraitUp]);
@@ -127,7 +130,40 @@ class _TuitionAppState extends State<TuitionApp> with WidgetsBindingObserver {
           debugShowCheckedModeBanner: false,
           theme: theme,
           routerConfig: _router,
+          builder: (context, child) => _NotTooWide(child: child!),
         ),
+      ),
+    );
+  }
+}
+
+/// The app is made for phones. On a tablet, or in a computer's browser, its screens would stretch across the whole width, with
+/// fields a hand's length long and a receipt the size of a poster, so it keeps to a column in the middle, edged with a hairline on
+/// each side. Everything inside, dialogs included, sees the column's width as the screen's.
+class _NotTooWide extends StatelessWidget {
+  const _NotTooWide({required this.child});
+
+  final Widget child;
+
+  static const _most = 720.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final mq = MediaQuery.of(context);
+    if (mq.size.width <= _most + 2) return child;
+    return ColoredBox(
+      color: bg,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          ColoredBox(color: hairline, child: const SizedBox(width: 1)),
+          SizedBox(
+            width: _most,
+            child: MediaQuery(data: mq.copyWith(size: Size(_most, mq.size.height)), child: child),
+          ),
+          ColoredBox(color: hairline, child: const SizedBox(width: 1)),
+        ],
       ),
     );
   }

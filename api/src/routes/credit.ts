@@ -1,10 +1,11 @@
 import { Hono } from 'hono';
 import { tuitionOf, type AppEnv } from '../lib/auth.ts';
 import {
-  addCredit, askForCredit, balanceOf, creditCode, creditSettings, historyOf, MAX_BY_HAND, requestOut, showCreditCode, TOP_UPS, type CreditSettings,
+  addCredit, balanceOf, creditCode, creditSettings, historyOf, MAX_BY_HAND, requestOut, showCreditCode, TOP_UPS, type CreditSettings,
 } from '../lib/credit.ts';
 import { q, q1, tx } from '../lib/db.ts';
 import { bad, bool, date, HttpError, int, notFound, str, uuid } from '../lib/http.ts';
+import { planNow, plansOnSale, refreshPlanCredit } from '../lib/plans.ts';
 import { costInr, rupees } from '../lib/pricing.ts';
 import { readBody } from './body.ts';
 
@@ -13,11 +14,17 @@ import { readBody } from './body.ts';
 
 export const creditRoutes = new Hono<AppEnv>();
 
-/** The AI credit screen: the balance, the prices, where and how to pay, the payments waiting to be checked, and the last few lines. */
+/**
+ * The AI credit screen: the balance (with this month's AI of a plan in it), the prices, the plan the AI comes with, the payments
+ * waiting to be checked, and the last few lines. Credit is no longer sold on its own (`topups` false): more AI comes with a bigger
+ * plan or the plan's next month (Santosh, 24 Nov 2026: "Upgrade only"). `pay` stays for the app before plans.
+ */
 creditRoutes.get('/credit', async (c) => {
   const T = tuitionOf(c).id;
+  await refreshPlanCredit(T);
   const s = await creditSettings();
   const { balance, free } = await balanceOf(T);
+  const p = await planNow(T);
   // Paying is open once the developer has given a UPI id; until then the app says adding credit opens soon.
   const open = s.upiId !== '';
   const waiting = await q(
@@ -26,7 +33,9 @@ creditRoutes.get('/credit', async (c) => {
   );
   return c.json({
     credit: { balance_paise: balance, free_paise: free },
-    prices: { page_paise: s.pagePaise, question_paise: s.questionPaise },
+    prices: { page_paise: s.pagePaise, question_paise: s.questionPaise, solution_paise: s.solutionPaise },
+    plan: { name: p.plan, last_day: p.lastDay, next_month_on: p.nextMonthOn, plans_on_sale: await plansOnSale() },
+    topups: false,
     pay: {
       open, upi_id: open ? s.upiId : null, upi_name: open ? s.upiName : null, code: open ? showCreditCode(await creditCode(T)) : null, amounts_paise: TOP_UPS,
     },
@@ -42,13 +51,12 @@ creditRoutes.get('/credit/history', async (c) => {
   return c.json({ lines: lines.slice(0, 30), more: lines.length > 30 });
 });
 
-/** "I have paid": asks the developer to find the payment and add the credit. */
-creditRoutes.post('/credit/requests', async (c) => {
-  const b = await readBody(c);
-  // The range is checked with the rest of the request, which says it in rupees.
-  const amount = int(b, 'amount_paise')!;
-  const r = await askForCredit(tuitionOf(c).id, c.get('user').id, amount);
-  return c.json({ request: requestOut(r) }, 201);
+/**
+ * "I have paid" for credit, from the app before plans. Credit is no longer sold on its own: AI comes with the plans (Santosh, 24
+ * Nov 2026: "Upgrade only"), so this says where to go instead. askForCredit stays for the day top-ups come back.
+ */
+creditRoutes.post('/credit/requests', async () => {
+  throw new HttpError(409, 'plans_only', 'AI now comes with the plans. Move to Basic or Pro in Settings, Plan, for AI every month.');
 });
 
 // ---------------------------------------------------------------- the developer's side
@@ -60,7 +68,8 @@ export const creditAdminRoutes = new Hono<AppEnv>();
 const IST_MONTH = `(date_trunc('month', now() at time zone 'Asia/Kolkata') at time zone 'Asia/Kolkata')`;
 
 const settingsOut = (s: CreditSettings) => ({
-  page_paise: s.pagePaise, question_paise: s.questionPaise, start_paise: s.startPaise, new_clients_ai: s.newClientsAi, upi_id: s.upiId, upi_name: s.upiName,
+  page_paise: s.pagePaise, question_paise: s.questionPaise, solution_paise: s.solutionPaise, start_paise: s.startPaise, new_clients_ai: s.newClientsAi,
+  upi_id: s.upiId, upi_name: s.upiName,
 });
 
 /** The requests with their client, as the admin app lists them. */
@@ -70,15 +79,17 @@ const REQUESTS = `select r.id, r.amount_paise, r.code, r.upi_id, r.status, r.cre
 const requestRow = (r: any) => ({ ...requestOut(r), client_id: r.client_id, client: r.client, owner: r.owner });
 
 /**
- * This month's credit and what AI cost to give it, at list prices: credit added and used, the pages read and questions written, and
- * what reading a page and writing a question cost on average. Finding answers serves both, so its cost is given on its own.
+ * This month's credit and what AI cost to give it, at list prices: credit added and used, the pages read, questions written and
+ * worked solutions written, and what each of those cost on average. Finding answers serves the first two, so its cost is given on
+ * its own; a worked solution's average counts the ones that were not kept, which were not charged.
  */
 async function monthFigures() {
-  const credit = await q1<{ added: number; used: number; pages: number; questions: number }>(
+  const credit = await q1<{ added: number; used: number; pages: number; questions: number; solutions: number }>(
     `select coalesce(sum(amount_paise) filter (where kind in ('topup', 'by_hand')), 0)::int as added,
-            coalesce(-sum(amount_paise) filter (where kind in ('page', 'questions')), 0)::int as used,
+            coalesce(-sum(amount_paise) filter (where kind in ('page', 'questions', 'solutions')), 0)::int as used,
             count(*) filter (where kind = 'page')::int as pages,
-            coalesce(sum(questions) filter (where kind = 'questions'), 0)::int as questions
+            coalesce(sum(questions) filter (where kind = 'questions'), 0)::int as questions,
+            coalesce(sum(questions) filter (where kind = 'solutions'), 0)::int as solutions
        from credit_ledger where created_at >= ${IST_MONTH}`,
   );
   const use = await q<{ task: string; model: string; prompt: number; completion: number }>(
@@ -89,15 +100,18 @@ async function monthFigures() {
     use.filter((u) => tasks === null || tasks.includes(u.task)).reduce((a, u) => a + costInr(u.model, Number(u.prompt), Number(u.completion)), 0);
   const pages = credit?.pages ?? 0;
   const questions = credit?.questions ?? 0;
+  const solutions = credit?.solutions ?? 0;
   return {
     credit_added_paise: credit?.added ?? 0,
     credit_used_paise: credit?.used ?? 0,
     pages,
     questions,
+    solutions,
     ai_worth_inr: rupees(cost(null)),
     page_cost_inr: pages ? rupees(cost(['read_paper_page', 'detect_paper']) / pages) : null,
     question_cost_inr: questions ? rupees(cost(['write_questions']) / questions) : null,
     answers_cost_inr: rupees(cost(['answer_questions', 'second_opinion'])),
+    solution_cost_inr: solutions ? rupees(cost(['worked_solutions']) / solutions) : null,
   };
 }
 
@@ -129,6 +143,7 @@ creditAdminRoutes.put('/credit/settings', async (c) => {
   const set: [string, unknown][] = [];
   if (has('page_paise')) set.push(['credit_page_paise', int(b, 'page_paise', { min: 0, max: 10000 })]);
   if (has('question_paise')) set.push(['credit_question_paise', int(b, 'question_paise', { min: 0, max: 10000 })]);
+  if (has('solution_paise')) set.push(['credit_solution_paise', int(b, 'solution_paise', { min: 0, max: 10000 })]);
   if (has('start_paise')) set.push(['credit_start_paise', int(b, 'start_paise', { min: 0, max: 100000 })]);
   if (has('new_clients_ai')) set.push(['credit_new_clients_ai', bool(b, 'new_clients_ai')]);
   if (has('upi_id')) set.push(['credit_upi_id', upiId(b.upi_id)]);

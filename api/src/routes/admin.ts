@@ -6,6 +6,7 @@ import { pool, q, q1 } from '../lib/db.ts';
 import { aiConfigured } from '../lib/groq.ts';
 import { HttpError, notFound, uuid } from '../lib/http.ts';
 import { libraryUsage, quotaBytes } from '../lib/library.ts';
+import { effectivePlan } from '../lib/plans.ts';
 import { costInr, isEstimated, rupees, USD_INR } from '../lib/pricing.ts';
 import { pushConfigured } from '../lib/push.ts';
 import { listObjects, readObject, viewUrl } from '../lib/storage.ts';
@@ -378,7 +379,7 @@ adminRoutes.get('/log', async (c) => {
 
 /** One row per tuition: what it is, how big, how much it uses the API, what its AI use is worth. */
 const CLIENT_BASE = `
-  select t.id, t.name, t.created_at, t.join_open, t.plan, t.credit_paise,
+  select t.id, t.name, t.created_at, t.join_open, ${effectivePlan('t')} as plan, (t.plan_until - 1)::text as plan_last_day, t.credit_paise,
          (select u.display_name from memberships m join users u on u.id = m.user_id where m.tuition_id = t.id and m.role = 'owner' limit 1) as owner,
          (select u.username from memberships m join users u on u.id = m.user_id where m.tuition_id = t.id and m.role = 'owner' limit 1) as owner_username,
          (select count(*) from memberships m where m.tuition_id = t.id and m.role = 'student' and m.status = 'active') as students,
@@ -421,7 +422,7 @@ adminRoutes.get('/clients', async (c) => {
   const creditMonthOf = new Map(
     (await q(
       `select tuition_id, coalesce(sum(amount_paise) filter (where kind in ('topup', 'by_hand')), 0)::int as added,
-              coalesce(-sum(amount_paise) filter (where kind in ('page', 'questions')), 0)::int as used
+              coalesce(-sum(amount_paise) filter (where kind in ('page', 'questions', 'solutions')), 0)::int as used
          from credit_ledger where created_at >= ${IST_MONTH} group by tuition_id`,
     )).map((x) => [x.tuition_id as string, x]),
   );
@@ -432,6 +433,8 @@ adminRoutes.get('/clients', async (c) => {
     const cm = creditMonthOf.get(t.id);
     return {
       id: t.id, name: t.name, created_at: t.created_at, owner: t.owner, owner_username: t.owner_username,
+      // The plan today (lib/plans.ts), and the last day a paid one covers.
+      plan: t.plan, plan_last_day: t.plan === 'free' ? null : t.plan_last_day,
       students: num(t.students), tutors: num(t.tutors), pending: num(t.pending), groups: num(t.groups), tests: num(t.tests), papers: num(t.papers),
       last_active_at: t.last_active_at,
       // The Library: what the tuition keeps on its shelves, against what it is allowed (the same numbers its tutors are held to).
@@ -450,6 +453,10 @@ adminRoutes.get('/clients', async (c) => {
     };
   });
   const sum = (f: (x: (typeof clients)[number]) => number) => clients.reduce((a, x) => a + f(x), 0);
+  // Plan payments tutors say they made, waiting to be checked (routes/plans.ts).
+  const planWaiting = await q1<{ n: number; paise: number }>(
+    `select count(*)::int as n, coalesce(sum(amount_paise), 0)::int as paise from plan_requests where status = 'waiting'`,
+  );
   const unattributed = month.filter((r) => !r.tuition_id);
   // The prices, so the admin app can mark a client whose credit is low (less than a page) or out (less than the cheaper of the two), as the tutor's own app does.
   const prices = await creditSettings();
@@ -457,7 +464,7 @@ adminRoutes.get('/clients', async (c) => {
     server_time: new Date().toISOString(),
     counting_since: since?.since ?? null,
     usd_inr: USD_INR,
-    credit_prices: { page_paise: prices.pagePaise, question_paise: prices.questionPaise },
+    credit_prices: { page_paise: prices.pagePaise, question_paise: prices.questionPaise, solution_paise: prices.solutionPaise },
     totals: {
       clients: clients.length,
       active_week: clients.filter((x) => x.last_active_at && Date.now() - new Date(x.last_active_at).getTime() < 7 * 86_400_000).length,
@@ -473,6 +480,8 @@ adminRoutes.get('/clients', async (c) => {
       credit_waiting_paise: sum((x) => x.credit.waiting_paise),
       credit_added_month_paise: sum((x) => x.credit.added_month_paise),
       credit_used_month_paise: sum((x) => x.credit.used_month_paise),
+      plan_waiting: planWaiting?.n ?? 0,
+      plan_waiting_paise: planWaiting?.paise ?? 0,
     },
     clients,
   });
@@ -551,7 +560,7 @@ adminRoutes.get('/clients/:id', async (c) => {
   );
   const creditMonth = await q1(
     `select coalesce(sum(amount_paise) filter (where kind in ('topup', 'by_hand')), 0)::int as added,
-            coalesce(-sum(amount_paise) filter (where kind in ('page', 'questions')), 0)::int as used
+            coalesce(-sum(amount_paise) filter (where kind in ('page', 'questions', 'solutions')), 0)::int as used
        from credit_ledger where tuition_id = $1 and created_at >= ${IST_MONTH}`,
     [id],
   );

@@ -19,8 +19,20 @@ String? nearDay(DateTime t) {
   return null;
 }
 
+/// A day as the server writes it (YYYY-MM-DD, India's calendar), as a date on this phone.
+DateTime dayOf(String ymd) {
+  final p = ymd.split('-').map(int.parse).toList();
+  return DateTime(p[0], p[1], p[2]);
+}
+
+/// A date as the server writes days: YYYY-MM-DD.
+String dayKey(DateTime d) => '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
 /// "Tue 6 Oct": the day name, the date and the month, always.
 String shortDate(DateTime t) => DateFormat('EEE d MMM').format(t).replaceAll(' ', _glue);
+
+/// "Tue 6 Oct 2026": with the year, for a day that may be in another year (the end of a plan).
+String longDate(DateTime t) => DateFormat('EEE d MMM y').format(t).replaceAll(' ', _glue);
 
 /// "today", "tomorrow", "yesterday" or "Tue 6 Oct".
 String day(DateTime t) => nearDay(t) ?? shortDate(t);

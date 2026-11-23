@@ -6,6 +6,11 @@ import 'package:flutter_math_fork/flutter_math.dart';
 import '../theme.dart';
 
 final _tex = RegExp(r'\$([^$]+)\$');
+
+/// Maths between $$ and $$, LaTeX's form for a formula on a line of its own. The reader is told to write $...$, but a model
+/// slips now and then and a tutor may type it: it is drawn as $...$ is, not with its dollar signs showing (on a printed test
+/// they could not be taken back).
+final _doubled = RegExp(r'\$\$([^$]+)\$\$');
 final _openingRun = RegExp(r'''[(\[{"'“‘-]+$''');
 final _touchingRun = RegExp(r'^[^\s$]{1,12}');
 
@@ -89,16 +94,24 @@ String _tablesInLine(List<Object> parts) => [
 /// group's passage (long paragraphs, often under a "Case study" heading, a blank line, the question last) shows the question first
 /// and the passage after it, so the questions of one case study do not all look alike in a list.
 String previewOf(String source) {
-  final paras = source.split(RegExp(r'\n[ \t]*\n')).map((p) => p.trim()).where((p) => p.isNotEmpty).toList();
   String inLine(String s) {
     final parts = splitTables(s);
     return parts.length == 1 && parts.single is String ? s : _tablesInLine(parts);
   }
 
+  final p = passageOf(source);
+  if (p == null) return inLine(source);
+  return '${p.question} · ${p.passage.replaceAll(RegExp(r'\s*\n\s*'), ' ')}';
+}
+
+/// A question that starts with its group's passage (long paragraphs, often under a "Case study" heading, a blank line, the question
+/// last), as the passage and the question apart; null for any other question, one with a table among them. The questions of one
+/// case study each carry the same passage, so a printed test can set it once above them.
+({String passage, String question})? passageOf(String source) {
+  final paras = source.split(RegExp(r'\n[ \t]*\n')).map((p) => p.trim()).where((p) => p.isNotEmpty).toList();
   final before = paras.length >= 2 ? paras.sublist(0, paras.length - 1).join('\n\n') : '';
-  final passage = before.length >= 100 && !before.contains('|') && !paras.last.contains('|');
-  if (!passage) return inLine(source);
-  return '${paras.last} · ${before.replaceAll(RegExp(r'\s*\n\s*'), ' ')}';
+  if (before.length < 100 || before.contains('|') || paras.last.contains('|')) return null;
+  return (passage: before, question: paras.last);
 }
 
 /// Text with `$...$` LaTeX segments rendered inline. A formula that fails to parse
@@ -117,20 +130,27 @@ class MathText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (maxLines != null) return _text(previewOf(source));
-    final parts = splitTables(source);
-    if (parts.length == 1 && parts.single is String) return _text(source);
+    // The text goes on a span with this style, and a span that names its own font loses the fallback fonts of the text
+    // around it, so they are carried over. The app names none (a phone falls back to its own fonts, for Hindi and Tamil
+    // too); the screenshot tests name the ones they have.
+    final style = this.style.fontFamilyFallback != null
+        ? this.style
+        : this.style.copyWith(fontFamilyFallback: DefaultTextStyle.of(context).style.fontFamilyFallback);
+    final text = source.replaceAllMapped(_doubled, (m) => '\$${m[1]}\$');
+    if (maxLines != null) return _text(previewOf(text), style);
+    final parts = splitTables(text);
+    if (parts.length == 1 && parts.single is String) return _text(text, style);
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: textAlign == TextAlign.center ? CrossAxisAlignment.center : CrossAxisAlignment.start,
       children: [
         for (final p in parts)
-          if (p is String) _text(p) else Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: _Table(rows: p as TextTable, style: style)),
+          if (p is String) _text(p, style) else Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: _Table(rows: p as TextTable, style: style)),
       ],
     );
   }
 
-  Widget _text(String source) {
+  Widget _text(String source, TextStyle style) {
     final parts = <(bool, String)>[];
     var last = 0;
     for (final m in _tex.allMatches(source)) {
@@ -234,16 +254,17 @@ class _Table extends StatelessWidget {
       }
       widths[c] = FixedColumnWidth(math.min(_widest, w * 1.1 + 4) + 2 * _padX);
     }
+    final paper = context.dependOnInheritedWidgetOfExactType<LightPaper>() != null;
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Table(
         columnWidths: widths,
-        border: TableBorder.all(color: faint, width: 0.8),
+        border: TableBorder.all(color: paper ? LightPaper.line : faint, width: 0.8),
         defaultVerticalAlignment: TableCellVerticalAlignment.middle,
         children: [
           for (var r = 0; r < shown.length; r++)
             TableRow(
-              decoration: headed && r == 0 ? BoxDecoration(color: fill) : null,
+              decoration: headed && r == 0 ? BoxDecoration(color: paper ? LightPaper.head : fill) : null,
               children: [
                 for (final cell in shown[r])
                   Padding(padding: const EdgeInsets.symmetric(horizontal: _padX, vertical: _padY), child: MathText(cell, style: styleOf(r))),
@@ -253,6 +274,25 @@ class _Table extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Marks what is drawn for paper (a printed test, a picture to share): its tables take the light theme's lines and
+/// heading fill whatever the phone shows, as the text in it takes the colour of the style it is given.
+class LightPaper extends InheritedWidget {
+  const LightPaper({super.key, required super.child});
+
+  /// The light theme's faint and fill.
+  static const line = Color(0xFFB8B8C2);
+  static const head = Color(0xFFF3F3F6);
+
+  /// The light theme's page, ink, body and muted, for what is drawn on paper.
+  static const page = Color(0xFFFFFFFF);
+  static const ink = Color(0xFF0E0E11);
+  static const body = Color(0xFF3A3A42);
+  static const muted = Color(0xFF8E8E99);
+
+  @override
+  bool updateShouldNotify(LightPaper oldWidget) => false;
 }
 
 /// Plain text for screen readers: what a sighted student reads, without the LaTeX.

@@ -22,8 +22,12 @@ import {
 } from '../lib/tuition.ts';
 import { createWithLogin, pinOf, planLogin, tutorMadeLoginsOff } from '../lib/students.ts';
 import { freeUsername, latinName } from '../lib/usernames.ts';
+import { attendanceOf, attendanceToday } from './attendance.ts';
+import { pageTimes } from '../lib/timetable.ts';
+import { feeOfStudent, feesForHome } from './fees.ts';
 import { changePassword } from './auth.ts';
 import { readBody } from './body.ts';
+import { planNow, plansOnSale, refreshPlanCredit, roomFor } from '../lib/plans.ts';
 
 // Mounted behind requireUser('teacher') in index.ts, which also gives every request its tuition:
 // everything below reads and writes that tuition's data only.
@@ -208,6 +212,8 @@ teacherRoutes.post('/students', async (c) => {
   const pin = pinOf(b);
   try {
     const { result: u, username } = await createWithLogin(plan, pin, async (cx, login) => {
+      // A new student takes room on the tuition's plan (lib/plans.ts).
+      await roomFor(cx, T, 'student');
       const row = await q1(
         `insert into users (role, username, display_name, class_level, secret_hash, secret_salt)
          values ('student', $1, $2, $3, $4, $5) returning id, username, display_name, class_level`,
@@ -232,11 +238,15 @@ teacherRoutes.post('/students', async (c) => {
 /**
  * One student's page: their results and the tests they missed. For a group's page that means the tuition's class
  * tests; with ?course=<id> it means that course's tests only, and no chapters, because a course has none.
+ * A report for parents covers one period: ?from= and ?to= (dates and times, `to` not included) keep the tests handed in,
+ * the chapters worked on and the tests that closed in it. Without them the page has everything, tests being written too.
  */
 teacherRoutes.get('/students/:id', async (c) => {
   const T = tuitionOf(c).id;
   const id = uuid(c.req.param('id'), 'student id');
   const courseId = uuidOpt(c.req.query('course'), 'course');
+  const from = date({ from: c.req.query('from') }, 'from');
+  const to = date({ to: c.req.query('to') }, 'to');
   if (courseId) await ownCourse(T, courseId);
   await q('select finalize_expired_attempts()');
   const s = await tq1(
@@ -253,8 +263,10 @@ teacherRoutes.get('/students/:id', async (c) => {
     `select a.id, a.test_id, t.title, a.attempt_no, a.score, a.max_score, a.correct_count, a.wrong_count, a.skipped_count,
             a.started_at, a.submitted_at, a.auto_submitted
        from attempts a join tests t on t.id = a.test_id
-      where a.student_id = $1 and t.tuition_id = @T and t.course_id is not distinct from $2::uuid order by a.started_at desc`,
-    [id, courseId],
+      where a.student_id = $1 and t.tuition_id = @T and t.course_id is not distinct from $2::uuid
+        and ($3::timestamptz is null or a.submitted_at >= $3) and ($4::timestamptz is null or a.submitted_at < $4)
+      order by a.started_at desc`,
+    [id, courseId, from, to],
   );
   const chapters = courseId
     ? []
@@ -268,8 +280,9 @@ teacherRoutes.get('/students/:id', async (c) => {
            left join answers an on an.attempt_id = a.id and an.question_id = qq.id
            left join chapters ch on ch.id = qq.chapter_id
           where a.student_id = $1 and a.submitted_at is not null
+            and ($2::timestamptz is null or a.submitted_at >= $2) and ($3::timestamptz is null or a.submitted_at < $3)
           group by 1 order by 1`,
-        [id],
+        [id, from, to],
       );
   const missed = await tq(
     T,
@@ -277,10 +290,15 @@ teacherRoutes.get('/students/:id', async (c) => {
      select t.id, t.title, t.closes_at from assigned a join tests t on t.id = a.test_id
       where a.student_id = $1 and t.closes_at < now() and t.course_id is not distinct from $2::uuid
         and not exists (select 1 from attempts x where x.test_id = t.id and x.student_id = $1)
+        and ($3::timestamptz is null or t.closes_at >= $3) and ($4::timestamptz is null or t.closes_at < $4)
       order by t.closes_at desc`,
-    [id, courseId],
+    [id, courseId, from, to],
   );
-  return c.json({ student: s, attempts, chapters, missed });
+  // The same registers as the results: a course's on its page, the groups' on a group's, in the report's period when it has one.
+  const attendance = await attendanceOf(T, id, { courseId, from, to });
+  // Their fee and what they still owe: only the owner sees fees.
+  const fee = tuitionOf(c).role === 'owner' && !courseId ? { fee: await feeOfStudent(T, id) } : {};
+  return c.json({ student: s, attempts, chapters, missed, attendance, ...fee });
 });
 
 teacherRoutes.patch('/students/:id', async (c) => {
@@ -347,6 +365,10 @@ teacherRoutes.delete('/students/:id', async (c) => {
     await tq(T, 'delete from test_notices n using tests t where t.id = n.test_id and t.tuition_id = @T and n.student_id = $1', [id], cx);
     await tq(T, 'delete from student_subjects where tuition_id = @T and student_id = $1', [id], cx);
     await tq(T, 'delete from course_members cm using courses co where co.id = cm.course_id and co.tuition_id = @T and cm.student_id = $1', [id], cx);
+    // Their attendance here goes with their results; another tuition's registers keep theirs.
+    await tq(T, 'delete from attendance_marks am using attendance_days d where d.id = am.day_id and d.tuition_id = @T and am.student_id = $1', [id], cx);
+    // Their fee stops; the payments they made stay, with their name, as the tutor's records.
+    await tq(T, 'delete from fee_rates where tuition_id = @T and student_id = $1', [id], cx);
     await tq(T, 'delete from memberships where tuition_id = @T and user_id = $1', [id], cx);
     return true;
   });
@@ -358,11 +380,16 @@ teacherRoutes.post('/students/:id/active', async (c) => {
   const T = tuitionOf(c).id;
   const id = uuid(c.req.param('id'), 'student id');
   const active = bool(await readBody(c), 'active');
-  const m = await tq1(
-    T,
-    `update memberships set status = $2 where tuition_id = @T and user_id = $1 and role = 'student' and status in ('active', 'off') returning user_id`,
-    [id, active ? 'active' : 'off'],
-  );
+  const m = await tx(async (cx) => {
+    // A place turned on takes room on the tuition's plan (lib/plans.ts); turning one off never waits.
+    if (active) await roomFor(cx, T, 'student', id);
+    return tq1(
+      T,
+      `update memberships set status = $2 where tuition_id = @T and user_id = $1 and role = 'student' and status in ('active', 'off') returning user_id`,
+      [id, active ? 'active' : 'off'],
+      cx,
+    );
+  });
   if (!m) throw notFound('This student');
   // Only a tutor's login goes off with their last place (lib/tuition.ts, refreshLogin): a student's stays theirs.
   const loginOn = await refreshLogin(id);
@@ -563,14 +590,21 @@ teacherRoutes.get('/home', async (c) => {
             (select count(*) from (select user_id from memberships where tuition_id = @T and role = 'student' and status = 'pending'
                                    union select student_id from join_requests where tuition_id = @T) w) as pending`,
   );
-  // AI credit, for the balance on Home and the note when it has run out (lib/credit.ts).
+  // AI credit, for the balance on Home and the note when it has run out (lib/credit.ts), with this month's AI of a plan in it
+  // (lib/plans.ts).
+  await refreshPlanCredit(T);
   const credit = await balanceOf(T);
   const prices = await creditSettings();
+  const plan = await planNow(T);
   return c.json({
     server_now: meta.now,
     tuition: { id: T, name: t.name, join_code: meta.join_code },
     pending_requests: Number(meta.pending),
-    credit: { balance_paise: credit.balance, free_paise: credit.free, page_paise: prices.pagePaise, question_paise: prices.questionPaise },
+    credit: {
+      balance_paise: credit.balance, free_paise: credit.free, page_paise: prices.pagePaise, question_paise: prices.questionPaise, solution_paise: prices.solutionPaise,
+      // The plan the AI comes with, and when its next month's AI comes (null on Free and in a plan's last month).
+      plan: plan.plan, next_month_on: plan.nextMonthOn, plans_on_sale: await plansOnSale(),
+    },
     groups: out,
     // The totals are the groups' (an app from before courses reads them as the whole Home); the courses carry their own.
     totals: {
@@ -580,6 +614,8 @@ teacherRoutes.get('/home', async (c) => {
     ...(knowsCourses(c) ? { courses: await courseCards(T) } : {}),
     // The simpler Home also lists the tests that finished lately, the papers the tutor has yet to finish and the tests left open for a week.
     ...(knowsSimpleHome(c) ? { finished: await recentFinished(T), papers: await papersToFinish(T), stale: await staleTests(T) } : {}),
+    // This month's fees and the payments waiting to be confirmed: only the owner sees fees (routes/fees.ts).
+    ...(t.role === 'owner' ? { fees: await feesForHome(T) } : {}),
   });
 });
 
@@ -620,7 +656,15 @@ teacherRoutes.get('/groups/:cls/:subject', async (c) => {
       limit 100`,
     [cls, subjectId],
   );
-  return c.json({ group: { class_level: cls, subject_id: subjectId, subject: subject.name }, students, tests, library: await groupLibraryCount(T, cls, subjectId) });
+  return c.json({
+    group: { class_level: cls, subject_id: subjectId, subject: subject.name },
+    students,
+    tests,
+    library: await groupLibraryCount(T, cls, subjectId),
+    attendance_today: await attendanceToday(T, { kind: 'group', cls, subjectId }),
+    // The group's timetable (routes/timetable.ts): none until the tuition has the group.
+    times: await pageTimes(T, { kind: 'group', cls, subjectId }),
+  });
 });
 
 // ---------------------------------------------------------------- tutors
@@ -646,6 +690,8 @@ teacherRoutes.post('/tutors', async (c) => {
   const { hash, salt } = await hashSecret(checkPassword(b.password));
   try {
     const u = await tx(async (cx) => {
+      // A new tutor takes room on the tuition's plan (lib/plans.ts).
+      await roomFor(cx, T, 'tutor');
       const row = await q1(
         `insert into users (role, username, display_name, secret_hash, secret_salt) values ('teacher', $1, $2, $3, $4)
          returning id, display_name, username, active, created_at`,
@@ -668,11 +714,16 @@ teacherRoutes.post('/tutors/:id/active', async (c) => {
   const id = uuid(c.req.param('id'), 'tutor id');
   if (id === c.get('user').id) throw new HttpError(409, 'self', 'You cannot turn off your own login.');
   const active = bool(await readBody(c), 'active');
-  const m = await tq1(
-    T,
-    `update memberships set status = $2 where tuition_id = @T and user_id = $1 and role = 'tutor' and status in ('active', 'off') returning user_id`,
-    [id, active ? 'active' : 'off'],
-  );
+  const m = await tx(async (cx) => {
+    // A place turned on takes room on the tuition's plan (lib/plans.ts); turning one off never waits.
+    if (active) await roomFor(cx, T, 'tutor', id);
+    return tq1(
+      T,
+      `update memberships set status = $2 where tuition_id = @T and user_id = $1 and role = 'tutor' and status in ('active', 'off') returning user_id`,
+      [id, active ? 'active' : 'off'],
+      cx,
+    );
+  });
   if (!m) throw notFound('This tutor');
   const loginOn = await refreshLogin(id);
   if (!active && !loginOn) await killSessions(id);
@@ -782,7 +833,7 @@ function readCourseQuestion(b: Record<string, any>) {
 
 const QUESTION_COLS = `qq.id, qq.class_level, qq.course_id, qq.chapter_id, ch.name as chapter, qq.subject_id,
   (select name from subjects where id = qq.subject_id) as subject, qq.text, qq.options, qq.correct_option,
-  qq.solution, qq.marks, qq.keep_option_order, qq.image_key, qq.source, qq.paper_id, qq.created_at, qq.updated_at,
+  qq.solution, qq.solution_by_ai, qq.marks, qq.keep_option_order, qq.image_key, qq.source, qq.paper_id, qq.created_at, qq.updated_at,
   coalesce(qq.difficulty, 'medium') as difficulty, qq.difficulty_by,
   (select exam_name from papers where id = qq.paper_id) as paper, (select category from papers where id = qq.paper_id) as category,
   (select count(*) from test_questions tq where tq.question_id = qq.id) as used_in`;
@@ -918,7 +969,11 @@ teacherRoutes.patch('/questions/:id', async (c) => {
     if (!before) throw notFound('This question');
     x.image_key = ownImageKey(T, x.image_key, before.image_key);
     await cx.query(
-      `update questions set class_level = $2, chapter_id = $3, text = $4, options = $5, correct_option = $6, solution = $7,
+      `update questions set class_level = $2, chapter_id = $3, text = $4, options = $5, correct_option = $6,
+                            -- A solution AI wrote stays AI's until the tutor changes it. AI's working reached the answer marked, so a
+                            -- new answer takes away a solution that is still AI's: it would reach the old one (routes/solutions.ts).
+                            solution = case when solution_by_ai and solution is not distinct from $7 and correct_option <> $6 then null else $7 end,
+                            solution_by_ai = solution_by_ai and solution is not distinct from $7 and correct_option = $6,
                             marks = $8, keep_option_order = $9, image_key = $10, updated_at = now(),
                             subject_id = coalesce($11::uuid, subject_id),
                             difficulty = case when $12::boolean then $13::text else difficulty end,
@@ -1124,6 +1179,7 @@ teacherRoutes.get('/tests/:id', async (c) => {
   const t = await tq1(
     T,
     `select t.*, (select name from courses where id = t.course_id) as course,
+            (select name from subjects where id = t.subject_id) as subject,
             (select count(*) from attempts x where x.test_id = t.id) as attempts from tests t where t.id = $1 and t.tuition_id = @T`,
     [id],
   );
@@ -1285,8 +1341,8 @@ teacherRoutes.get('/tests/:id/results', async (c) => {
   const pcts = done.map((r) => r.pct as number);
 
   const qs = await q(
-    `select qq.id, tq.position, qq.text, qq.options, qq.correct_option from test_questions tq
-       join questions qq on qq.id = tq.question_id where tq.test_id = $1 order by tq.position`,
+    `select qq.id, tq.position, qq.text, qq.options, qq.correct_option, coalesce(btrim(qq.solution), '') <> '' as has_solution, qq.solution_by_ai
+       from test_questions tq join questions qq on qq.id = tq.question_id where tq.test_id = $1 order by tq.position`,
     [id],
   );
   const counts = await q(
@@ -1308,6 +1364,9 @@ teacherRoutes.get('/tests/:id/results', async (c) => {
       text: qq.text,
       options: qq.options,
       correct_option: qq.correct_option,
+      // Whether it has a worked solution, and whether AI wrote it (routes/solutions.ts): the page offers to write the missing ones.
+      has_solution: qq.has_solution,
+      solution_by_ai: qq.solution_by_ai,
       option_counts: optionCounts,
       skipped: submittedAttempts - answered,
       correct_pct: submittedAttempts ? optionCounts[qq.correct_option] / submittedAttempts : null,
@@ -1402,6 +1461,8 @@ teacherRoutes.delete('/sample-data', async (c) => {
     const tests = await del('delete from tests where is_sample and tuition_id = @T returning id');
     const questions = await del('delete from questions where is_sample and tuition_id = @T returning id');
     const papers = await del('delete from papers where is_sample and tuition_id = @T returning id');
+    // Sample students are made up, and so are any payments tried on them.
+    await tq(T, 'delete from fee_payments p using users u where u.id = p.student_id and u.is_sample and p.tuition_id = @T', [], cx);
     const users = await del(
       `delete from users u where u.is_sample and u.role = 'student'
           and exists (select 1 from memberships m where m.user_id = u.id and m.tuition_id = @T) returning u.id`,

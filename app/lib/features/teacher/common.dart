@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/api.dart';
 import '../../core/format.dart' as f;
@@ -291,15 +292,32 @@ class DayTimeChooser extends StatelessWidget {
 }
 
 /// Shows an API problem in a centred card.
-Future<void> showProblem(BuildContext context, Object e) => showCentredCard<void>(
-      context,
-      title: 'That did not work',
-      builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Fig(e is ApiException ? e.message : 'Something went wrong. Please try again.', style: bodyStyle),
-        const SizedBox(height: 18),
+Future<void> showProblem(BuildContext context, Object e) {
+  // A full plan, or AI used up, is not a fault: the card says so and opens the plans (the server's lib/plans.ts).
+  final code = e is ApiException ? e.code : '';
+  final plan = const {'plan_students_full', 'plan_tutors_full', 'no_credit', 'plans_only'}.contains(code);
+  return showCentredCard<void>(
+    context,
+    title: switch (code) {
+      'plan_students_full' || 'plan_tutors_full' => 'Your plan is full',
+      'no_credit' => 'Not enough AI left',
+      _ => 'That did not work',
+    },
+    builder: (ctx) => Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Fig(e is ApiException ? e.message : 'Something went wrong. Please try again.', style: bodyStyle),
+      const SizedBox(height: 18),
+      if (plan) ...[
+        PrimaryButton('See plans', onTap: () {
+          Navigator.of(ctx).pop();
+          context.push('/t/plan');
+        }),
+        const SizedBox(height: 10),
+        SecondaryButton('Not now', onTap: () => Navigator.of(ctx).pop()),
+      ] else
         PrimaryButton('OK', onTap: () => Navigator.of(ctx).pop()),
-      ]),
-    );
+    ]),
+  );
+}
 
 /// A read-only fact list inside one surface.
 class FactList extends StatelessWidget {

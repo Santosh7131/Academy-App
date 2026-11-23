@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'api.dart';
@@ -18,6 +19,11 @@ class Push {
 
   /// Starts Firebase without holding up the first frame.
   static void start() {
+    // The web build has no Firebase set up: a browser gets no pushes, and its screens check for news by themselves.
+    if (kIsWeb) {
+      _started ??= Future.value(false);
+      return;
+    }
     _started ??= Firebase.initializeApp().then((_) => true, onError: (_) => false);
   }
 

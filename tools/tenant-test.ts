@@ -5,6 +5,8 @@
 import { randomInt } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import pg from 'pg';
+import { addDays, istToday } from '../api/src/lib/attendance.ts';
+import { thisMonth } from '../api/src/lib/fees.ts';
 
 const args = process.argv.slice(2);
 const envFile = args.includes('--env') ? args[args.indexOf('--env') + 1] : '.env.local';
@@ -40,9 +42,13 @@ const iso = (msFromNow: number) => new Date(Date.now() + msFromNow).toISOString(
 const code = (r: { body: any }) => r.body?.error?.code;
 
 const tag = `tenant${randomInt(1000, 9999)}`;
-const created = { users: [] as string[], tuitions: [] as string[], subjects: [] as string[], questions: [] as string[], tests: [] as string[], papers: [] as string[] };
+const created = { users: [] as string[], tuitions: [] as string[], subjects: [] as string[], questions: [] as string[], tests: [] as string[], papers: [] as string[], payments: [] as string[] };
 let groupsBefore: { class_level: number; subject_id: string }[] = [];
 let A = '';
+// What this run adds to A, the shared sample tuition, that the clean-up takes away again: a register on a day long past,
+// and the receipt number its payment used.
+let registerDay = '';
+let receiptUsed = 0;
 
 const db = new pg.Client({ connectionString: process.env.DATABASE_URL_UNPOOLED });
 await db.connect();
@@ -140,6 +146,34 @@ try {
   nf('B cannot unpublish A\'s test', await api('POST', `/teacher/tests/${aTest.body.id}/publish`, TB, { published: false }));
   nf('B cannot delete A\'s test', await api('DELETE', `/teacher/tests/${aTest.body.id}?with_results=1`, TB));
   nf('B cannot grant a retake on A\'s test', await api('POST', `/teacher/tests/${aTest.body.id}/retake`, TB, { student_id: a1 }));
+  nf('B cannot have AI write solutions for A\'s test', await api('POST', `/teacher/tests/${aTest.body.id}/solutions`, TB, { question_ids: [aq.body.id] }));
+  // Attendance: B's class of the same name is B's own, with none of A's students and none of A's registers. A is the
+  // shared sample tuition, so A's register is taken for a day long past that has none, and the clean-up takes it away.
+  const takenDays = new Set((await db.query(
+    "select to_char(day, 'YYYY-MM-DD') as d from attendance_days where tuition_id = $1 and class_level = 9 and subject_id = $2", [A, MATHS])).rows.map((r) => r.d));
+  let pastDay = addDays(istToday(), -300);
+  while (takenDays.has(pastDay)) pastDay = addDays(pastDay, -1);
+  const regA = await api('PUT', '/teacher/attendance', TA, { class_level: 9, subject_id: MATHS, day: pastDay, absent: [a1] });
+  if (regA.status === 200) registerDay = pastDay;
+  check("A takes its class's register", regA.status === 200 && regA.body.absent?.[0]?.id === a1, regA.body);
+  const regB = await api('GET', `/teacher/attendance?class_level=9&subject_id=${MATHS}&day=${pastDay}`, TB);
+  check("B sees neither A's register nor A's students", !(regB.status === 200 && (regB.body.register !== null || regB.body.students.length > 0)), regB.body);
+  check("B cannot mark A's student", (await api('PUT', '/teacher/attendance', TB, { class_level: 9, subject_id: MATHS, day: pastDay, absent: [a1] })).status === 400);
+  // Fees: A's owner sets a fee for A's new student alone (the sample students' fees are left as they are) and records a
+  // payment; B's owner sees none of it and can touch none of it. The clean-up takes the payment away.
+  const feeA = await api('PUT', '/teacher/fees/rates', TA, { fee_paise: 150000, due_day: 5, student_ids: [a1] });
+  const payA = await api('POST', '/teacher/fees/payments', TA, { student_id: a1, month: thisMonth(), amount_paise: 150000, method: 'cash' });
+  if (payA.body?.payment?.id) {
+    created.payments.push(payA.body.payment.id);
+    receiptUsed = Number(payA.body.payment.receipt_no);
+  }
+  check("A sets a fee and records a payment", feeA.status === 200 && feeA.body.students === 1 && payA.status === 201 && receiptUsed > 0, [feeA.body, payA.body]);
+  const feesB = await api('GET', '/teacher/fees', TB);
+  check("B's fees show none of A's students or payments", feesB.status === 200 && !JSON.stringify(feesB.body).includes(a1) && feesB.body.totals.collected === 0, feesB.body);
+  check("B cannot set a fee for A's class by A's student", (await api('PUT', '/teacher/fees/rates', TB, { fee_paise: 1, due_day: 1, student_ids: [a1] })).status === 400);
+  nf("B cannot open A's student's fees", await api('GET', `/teacher/fees/students/${a1}`, TB));
+  nf("B cannot take A's payment away", await api('DELETE', `/teacher/fees/payments/${payA.body.payment?.id}`, TB));
+  nf("B cannot confirm A's payment", await api('POST', `/teacher/fees/payments/${payA.body.payment?.id}/confirm`, TB));
   nf('B cannot open A\'s attempt', await api('GET', `/teacher/attempts/${attemptA}`, TB));
   check('B lists none of A\'s papers', (await api('GET', '/teacher/papers', TB)).body.papers.length === 0);
   nf('B cannot open A\'s paper', await api('GET', `/teacher/papers/${aPaper.body.paper.id}`, TB));
@@ -284,6 +318,9 @@ try {
   check('B\'s results of the student went with them', (await db.query('select 1 from attempts where test_id = $1', [bTest.body.id])).rowCount === 0);
 
   // ------------------------------------------------------------------ the owner, and a second tutor
+  // Free has room for one tutor (lib/plans.ts): the run's tuition is on Basic for its second, its AI for the month counted as given
+  // so its credit is as it was.
+  await db.query(`update tuitions set plan = 'basic', plan_from = current_date - 1, plan_until = current_date + 31, plan_refilled = current_date - 1 where id = $1`, [B]);
   const addT = await api('POST', '/teacher/tutors', TB, { display_name: 'Second Tutor', username: `${tag}.tutor2`, password: 'longenough2' });
   check('the owner adds a tutor', addT.status === 201, addT.body);
   created.users.push(addT.body.tutor.id);
@@ -414,6 +451,13 @@ try {
   await db.query('delete from tuitions where id = any($1::uuid[])', [created.tuitions]);
   await db.query('delete from subjects where id = any($1::uuid[])', [created.subjects]);
   if (A) {
+    // The register and the payment this run made in A. A payment stays on record when its student goes, so it is taken
+    // away by id, and its receipt number is given back when no receipt was given after it.
+    if (registerDay) {
+      await db.query('delete from attendance_days where tuition_id = $1 and class_level = 9 and subject_id = $2 and day = $3', [A, MATHS, registerDay]);
+    }
+    await db.query('delete from fee_payments where id = any($1::uuid[])', [created.payments]);
+    if (receiptUsed) await db.query('update tuitions set fee_receipt_no = fee_receipt_no - 1 where id = $1 and fee_receipt_no = $2', [A, receiptUsed]);
     // Groups this run made in A go too.
     const keep = groupsBefore.map((g) => `${g.class_level}:${g.subject_id}`);
     const now = (await db.query('select id, class_level, subject_id from groups where tuition_id = $1', [A])).rows;

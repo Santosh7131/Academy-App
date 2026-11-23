@@ -403,7 +403,7 @@ class CutFigure extends StatelessWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 220),
-            child: Image.network(url, fit: BoxFit.contain, errorBuilder: (_, _, _) => const SizedBox(height: 60, child: Center(child: Icon(Ph.image, color: _paperInk)))),
+            child: Image.network(url, fit: BoxFit.contain, webHtmlElementStrategy: WebHtmlElementStrategy.fallback, errorBuilder: (_, _, _) => const SizedBox(height: 60, child: Center(child: Icon(Ph.image, color: _paperInk)))),
           ),
           const SizedBox(height: 8),
           Wrap(spacing: 6, runSpacing: 6, crossAxisAlignment: WrapCrossAlignment.center, children: [
@@ -478,6 +478,7 @@ class _WholePageScreenState extends State<WholePageScreen> {
                   child: Image.network(
                     _url,
                     key: ValueKey('$_url#$_attempt'),
+                    webHtmlElementStrategy: WebHtmlElementStrategy.fallback,
                     frameBuilder: (context, child, frame, loadedAtOnce) => frame == null && !loadedAtOnce ? _note(_asking ? 'Getting the page again' : 'Loading the page') : child,
                     errorBuilder: (context, error, stack) => _note(_asking ? 'Getting the page again' : 'The page did not load. Tap to try again.', onTap: _asking ? null : _again),
                   ),

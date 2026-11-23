@@ -110,6 +110,7 @@ class _ClientsScreenState extends State<ClientsScreen> with WidgetsBindingObserv
     final shown = _sorted(clients);
     final prices = d['credit_prices'] is Map ? Map<String, dynamic>.from(d['credit_prices'] as Map) : null;
     final waiting = f.asInt(t['credit_waiting']);
+    final planWaiting = f.asInt(t['plan_waiting']);
 
     return [
       // Payments tutors say they made: the one thing on this tab that waits on the developer.
@@ -133,8 +134,29 @@ class _ClientsScreenState extends State<ClientsScreen> with WidgetsBindingObserv
             },
           ),
         ),
+      // Plan payments tutors say they made (screens/plans.dart).
+      if (planWaiting > 0)
+        Padding(
+          padding: EdgeInsets.fromLTRB(gutter, waiting > 0 ? gapRow : 18, gutter, 0),
+          child: RowTile(
+            leading: Container(
+              width: 44,
+              height: 44,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: warningSoft, borderRadius: BorderRadius.circular(14)),
+              child: Icon(Ph.coins, size: 22, color: warning),
+            ),
+            title: planWaiting == 1 ? '1 plan payment waiting' : '$planWaiting plan payments waiting',
+            meta: '${f.inr(f.asInt(t['plan_waiting_paise']))} to check in your UPI app',
+            chevron: true,
+            onTap: () async {
+              await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PlanRequestsScreen()));
+              if (mounted) _load();
+            },
+          ),
+        ),
       Padding(
-        padding: EdgeInsets.fromLTRB(gutter, waiting > 0 ? gapRow : 18, gutter, 0),
+        padding: EdgeInsets.fromLTRB(gutter, waiting > 0 || planWaiting > 0 ? gapRow : 18, gutter, 0),
         child: StatGrid(
           label: 'Clients',
           value: '${t['clients']}',
@@ -214,12 +236,14 @@ class _ClientsScreenState extends State<ClientsScreen> with WidgetsBindingObserv
   }
 
   /// The client's credit at the end of its row, as the tutor's own app shows it: amber when less than a page is left, red when less
-  /// than the cheaper of a page and a question (then AI work stops until credit is added).
+  /// than the cheapest AI work, a page, a question or a worked solution (then AI work stops until credit is added).
   Widget _credit(Map<String, dynamic> credit, Map<String, dynamic>? prices) {
     final balance = f.asInt(credit['balance_paise']);
     final page = prices == null ? null : f.asInt(prices['page_paise']);
     final question = prices == null ? null : f.asInt(prices['question_paise']);
-    final out = page != null && question != null && balance < (page < question ? page : question);
+    // A server before worked solutions sends no price for one.
+    final solution = prices?['solution_paise'] == null ? null : f.asInt(prices!['solution_paise']);
+    final out = page != null && question != null && balance < [page, question, ?solution].reduce((a, b) => a < b ? a : b);
     final low = !out && page != null && balance < page;
     final Color? tone = out ? danger : (low ? warning : null);
     return Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -243,7 +267,12 @@ class _ClientsScreenState extends State<ClientsScreen> with WidgetsBindingObserv
       metaWidget: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Fig(
           [
-            [if (c['owner'] != null) '${c['owner']}', f.plural(students, 'student'), if (pending > 0) '$pending waiting'].join(' · '),
+            [
+              if (c['owner'] != null) '${c['owner']}',
+              f.plural(students, 'student'),
+              if (pending > 0) '$pending waiting',
+              if (c['plan'] != null && c['plan'] != 'free') planName(c['plan']),
+            ].join(' · '),
             '${seen == null ? 'Never used' : 'Active ${f.ago(seen)}'} · AI ${f.rupees(f.asDouble(ai['cost_month_inr']))}',
           ].join('\n'),
           style: labelStyle.copyWith(color: muted),

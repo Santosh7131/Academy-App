@@ -1,6 +1,6 @@
 <p align="center"><img src="website/img/icon-192.png" width="84" alt=""></p>
 
-<h1 align="center">Tuition Tests</h1>
+<h1 align="center">AnyTutor</h1>
 
 <p align="center">
   <b>Photograph a question paper. Hand out the test.</b><br>
@@ -251,7 +251,7 @@ To turn it on, in the Google Cloud console (APIs & Services):
 2. Make an OAuth client of type **Web application**. Its client id is the one the app asks Google
    for tokens with.
 3. Make an OAuth client of type **Android** for each key the app is signed with: the package name
-   (`com.tuitiontests.app`, or `com.tuitiontests.app.dev` for debug builds and dev copies) and the
+   (`com.anytutor.app`, or `com.anytutor.app.dev` for debug builds and dev copies) and the
    key's SHA-1 (`keytool -list -v -keystore <keystore>`; the debug key is
    `~/.android/debug.keystore`, password `android`). Google uses it to know the app asking is
    yours; the app never names it.

@@ -165,7 +165,7 @@ Map<String, Object?> _creditAnswer({
       'pay': {
         'open': open,
         'upi_id': open ? 'upi-id@bank' : null,
-        'upi_name': open ? 'Tuition Tests' : null,
+        'upi_name': open ? 'AnyTutor' : null,
         if (open) 'code': 'CR-7K3Q',
         'amounts_paise': [10000, 25000, 50000, 100000],
       },
@@ -190,7 +190,7 @@ Map<String, Object?> _planAnswer({String plan = 'free', int students = 14, int t
       'owner': owner,
       'pay': {
         'open': open, 'here': true, 'where': 'both', 'for_sale': open ? ['basic', 'pro'] : <String>[], 'months': [1, 3, 6, 12],
-        'upi_id': open ? 'upi-id@bank' : null, 'upi_name': open ? 'Tuition Tests' : null, 'code': open ? 'CR-7K3Q' : null,
+        'upi_id': open ? 'upi-id@bank' : null, 'upi_name': open ? 'AnyTutor' : null, 'code': open ? 'CR-7K3Q' : null,
       },
       'waiting': waiting,
     };

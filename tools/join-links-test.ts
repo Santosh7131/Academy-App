@@ -136,7 +136,7 @@ try {
   check('the page is never kept or indexed', page.headers.get('cache-control') === 'no-store' && page.headers.get('x-robots-tag') === 'noindex', Object.fromEntries(page.headers));
   const words = (await db.query(`select ${groupClassSql('n', 'null::uuid')} as w from generate_series(1, 12) n order by n`)).rows.map((r) => r.w);
   check('a group\'s class is worded as the app words it (groupName in levels.dart)', words.join(' ') === '1st 2nd 3rd 4th 5th 6th 7th 8th 9th 10th 11th 12th', words);
-  check('and offers to open the app at the link', html.includes(`intent://app/join/${link9.code}#Intent;`) && html.includes('package=com.tuitiontests.app'), html.match(/intent:[^"]*/)?.[0]);
+  check('and offers to open the app at the link', html.includes(`intent://app/join/${link9.code}#Intent;`) && html.includes('package=com.anytutor.app'), html.match(/intent:[^"]*/)?.[0]);
 
   // ---------------------------------------------------------------- 3. asking with the link
   const ask1 = await api('POST', '/student/join', s1.S, { code: link9.url });

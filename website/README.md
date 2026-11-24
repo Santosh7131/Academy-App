@@ -31,9 +31,9 @@ Everything still to be filled in is marked on the pages: `FILL-IN` in the text, 
 4. **The names in the pictures.** The app pictures come from the app's screen tests and show sample
    names (a tuition called Priya Maths Classes, a student called Harini Venkatesh, and so on). They
    date from the app's first design work. Make sure none of them is a real person before publishing.
-5. **The product's name.** "Tuition Tests" is a stand-in. `node tools/rename-product.mjs "New Name"`
-   renames the apps, the server's messages and these pages in one go, and `--check` says whether
-   they agree.
+5. **The product's name** is AnyTutor (chosen on 24 November 2026). To change it,
+   `node tools/rename-product.mjs "New Name"` renames the apps, the server's messages and these
+   pages in one go, and `--check` says whether they agree.
 
 ## Put it online with GitHub Pages
 

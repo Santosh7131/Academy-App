@@ -1,6 +1,6 @@
 {
-  "name": "Tuition Tests",
-  "short_name": "Tuition Tests",
+  "name": "AnyTutor",
+  "short_name": "AnyTutor",
   "description": "Tests from your own question papers, marked the moment students hand in.",
   "start_url": ".",
   "display": "standalone",

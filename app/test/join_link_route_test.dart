@@ -56,7 +56,7 @@ void main() {
     session.dropJoin();
   });
 
-  for (final location in ['com.tuitiontests.app.dev://app/join/KR7Q4-MPAXZ', '/join/KR7Q4-MPAXZ']) {
+  for (final location in ['com.anytutor.app.dev://app/join/KR7Q4-MPAXZ', '/join/KR7Q4-MPAXZ']) {
     testWidgets('a link opened as $location is kept, and the login shows the invitation', (t) async {
       t.view.physicalSize = const Size(411 * 2.625, 900 * 2.625);
       t.view.devicePixelRatio = 2.625;
@@ -80,7 +80,7 @@ void main() {
     t.view.devicePixelRatio = 2.625;
     addTearDown(t.view.reset);
     // A link that starts the app arrives as the platform's first route, which the router takes over its own first page.
-    t.binding.platformDispatcher.defaultRouteNameTestValue = 'com.tuitiontests.app.dev://app/join/KR7Q4-MPAXZ';
+    t.binding.platformDispatcher.defaultRouteNameTestValue = 'com.anytutor.app.dev://app/join/KR7Q4-MPAXZ';
     addTearDown(t.binding.platformDispatcher.clearDefaultRouteNameTestValue);
     await t.pumpWidget(MaterialApp.router(theme: buildTheme(Brightness.light), routerConfig: buildRouter()));
     await _settle(t);

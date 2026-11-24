@@ -21,6 +21,7 @@ dist/
 
 # Agent tooling installed by `neon skills` (regenerate with `neon skills -y`)
 .claude/skills/
+.agents/
 skills-lock.json
 
 # Flutter / Dart / Android

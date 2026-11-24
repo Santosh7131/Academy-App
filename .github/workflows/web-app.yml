@@ -1,0 +1,124 @@
+# Builds the web app (README "The web version") on GitHub and puts it on Cloudflare Pages.
+#
+# - Every push to main that touches the app puts a build for the dev server at https://dev.anytutor.pages.dev
+#   (a preview of the project: public, and kept out of search engines by Cloudflare).
+# - Actions → Web app → Run workflow does the same by hand. Choosing "live" builds for the live server and puts it at
+#   https://anytutor.pages.dev; it is refused until LIVE_API_BASE below holds the live function's address. Only someone
+#   who can push to this repository can start a run.
+#
+# It needs two repository secrets (Settings → Secrets and variables → Actions): CLOUDFLARE_API_TOKEN, a Cloudflare token
+# that can only edit Pages (Account · Cloudflare Pages · Edit), and CLOUDFLARE_ACCOUNT_ID. The page can call the API only
+# from an address listed in the function's CORS_ORIGINS. Flutter comes straight from its own repository and the upload is
+# Cloudflare's own tool, Wrangler, at a fixed version: no third-party action in between.
+name: Web app
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'tools/build-web.ps1'
+      - 'tools/web-sri.mjs'
+      - '.github/workflows/web-app.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which server the build talks to
+        type: choice
+        options: [dev, live]
+        default: dev
+
+permissions:
+  contents: read
+
+# One upload at a time for each server; one already running is left to finish.
+concurrency:
+  group: web-app-${{ inputs.target || 'dev' }}
+  cancel-in-progress: false
+
+env:
+  # The Pages project's name, and the address Cloudflare gave it (the address gets a suffix when the name was taken).
+  PAGES_PROJECT: anytutor
+  PAGES_HOST: anytutor.pages.dev
+  DEV_API_BASE: https://br-soft-surf-bi4zsm2n-api.compute.c-5.ap-southeast-1.aws.neon.tech
+  # The live function's address, filled in when the live server goes up. Before the first live run, check in the
+  # Cloudflare dashboard that the project's production branch is main.
+  LIVE_API_BASE: ''
+  WRANGLER_VERSION: 4.159.0
+  WRANGLER_SEND_METRICS: 'false'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Choose the server and the address
+        id: target
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          if [ "$TARGET" = live ]; then
+            if [ -z "$LIVE_API_BASE" ]; then
+              echo "::error::The live server is not up yet. Put its address in LIVE_API_BASE in this file first."
+              exit 1
+            fi
+            { echo "api=$LIVE_API_BASE"; echo "branch=main"; echo "url=https://$PAGES_HOST"; } >> "$GITHUB_OUTPUT"
+          else
+            { echo "api=$DEV_API_BASE"; echo "branch=dev"; echo "url=https://dev.$PAGES_HOST"; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check the Cloudflare secrets are set
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      # The first run makes the Pages project, with main as its production branch, so nothing is uploaded by hand first.
+      - name: Make the Pages project if it is not there yet
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects"
+          out="$RUNNER_TEMP/project.json"
+          code=$(curl -sS -o "$out" -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$api/$PAGES_PROJECT")
+          if [ "$code" = 404 ]; then
+            code=$(curl -sS -o "$out" -w '%{http_code}' -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H 'Content-Type: application/json' --data "{\"name\":\"$PAGES_PROJECT\",\"production_branch\":\"main\"}" "$api")
+            echo "Made the Pages project $PAGES_PROJECT."
+          fi
+          case "$code" in
+            200|201) ;;
+            *) echo "::error::Cloudflare answered HTTP $code: $(jq -c '.errors' "$out"). Check the token and the account ID."; exit 1 ;;
+          esac
+          echo "Project $PAGES_PROJECT: address $(jq -r '.result.subdomain // "not given"' "$out"), production branch $(jq -r '.result.production_branch' "$out")."
+
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Flutter straight from its own repository at the version the project is built with, as in checks.yml.
+      - name: Install Flutter
+        run: |
+          git clone --depth 1 --branch 3.47.2 https://github.com/flutter/flutter.git "$HOME/flutter"
+          echo "$HOME/flutter/bin" >> "$GITHUB_PATH"
+
+      - name: Build the web app
+        shell: pwsh
+        env:
+          API_BASE: ${{ steps.target.outputs.api }}
+        run: ./tools/build-web.ps1 -ApiBase $env:API_BASE
+
+      - name: Put it on Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BRANCH: ${{ steps.target.outputs.branch }}
+          URL: ${{ steps.target.outputs.url }}
+        run: |
+          npx --yes "wrangler@$WRANGLER_VERSION" pages deploy app/build/web --project-name="$PAGES_PROJECT" --branch="$BRANCH"
+          echo "The web app is at $URL" >> "$GITHUB_STEP_SUMMARY"

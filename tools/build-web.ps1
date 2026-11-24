@@ -23,12 +23,15 @@ function Invoke-Native([string]$What, [scriptblock]$Run) {
 }
 
 $root = Split-Path $PSScriptRoot -Parent
+# Flutter lives in C:\src\flutter on the development PC; anywhere else (GitHub's machines, .github/workflows/web-app.yml)
+# it is on the PATH. Paths below use / so the script runs the same on Windows and Linux.
+$flutter = if (Test-Path 'C:\src\flutter\bin\flutter.bat') { 'C:\src\flutter\bin\flutter.bat' } else { 'flutter' }
 if ($Local) {
   if ($ApiBase -notmatch '^http://(127\.0\.0\.1|localhost):\d+$') { throw '-Local builds talk to this computer only, such as -ApiBase http://127.0.0.1:18787' }
 } else {
   if ($ApiBase -notmatch '^https://[^/\s]+$') { throw "-ApiBase is the live API's address, https://host with no path" }
   # As with the Android app: nothing goes out under the stand-in name (tools/rename-product.mjs chooses the name).
-  $brand = Get-Content (Join-Path $root 'app\lib\core\brand.dart') -Raw
+  $brand = Get-Content (Join-Path $root 'app/lib/core/brand.dart') -Raw
   if ($brand -match '(?m)^/// STAND-IN:') {
     throw 'The product has no name yet (app/lib/core/brand.dart still says STAND-IN). Choose it with tools/rename-product.mjs first.'
   }
@@ -39,11 +42,11 @@ Push-Location (Join-Path $root 'app')
 try {
   # --no-web-resources-cdn: the browser's drawing engine (CanvasKit) comes from the app's own host, not from Google's CDN.
   Invoke-Native 'flutter build web' {
-    & C:\src\flutter\bin\flutter.bat build web --release --no-web-resources-cdn "--base-href=$BaseHref" "--dart-define=API_BASE=$ApiBase"
+    & $flutter build web --release --no-web-resources-cdn "--base-href=$BaseHref" "--dart-define=API_BASE=$ApiBase"
   }
 } finally { Pop-Location }
 
-$index = Join-Path $root 'app\build\web\index.html'
+$index = Join-Path $root 'app/build/web/index.html'
 if (-not $Local) {
   Invoke-Native 'pinning pdf.js' { node (Join-Path $PSScriptRoot 'web-sri.mjs') $index }
 }

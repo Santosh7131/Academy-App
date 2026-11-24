@@ -1185,6 +1185,12 @@ opens it:
   `index.html`, `flutter_bootstrap.js`, `main.dart.js`, `version.json` or `assets/` without asking
   again (`Cache-Control: no-cache`); `canvaskit/` can be kept.
 
+**On Cloudflare Pages.** `.github/workflows/web-app.yml` builds it on GitHub and puts it on Cloudflare Pages, project
+`anytutor` (its first run makes the project). Every push to main that touches the app puts a build for the dev server at https://dev.anytutor.pages.dev;
+Actions → Web app → Run workflow → `live` puts a build for the live server at https://anytutor.pages.dev, once
+`LIVE_API_BASE` in the workflow names the live function. It needs two repository secrets: `CLOUDFLARE_API_TOKEN`, a
+token that can only edit Pages, and `CLOUDFLARE_ACCOUNT_ID`.
+
 To try it on this PC against the local API, build it for `tools/dev-serve.mjs`, start the API with
 the page's address let in, and serve the build:
 

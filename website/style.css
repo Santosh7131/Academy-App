@@ -56,10 +56,11 @@ a:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outli
 .top nav a:hover { color: var(--ink); background: var(--sunk); }
 .top nav a.dl { color: var(--ink); background: var(--sunk); }
 @media (prefers-color-scheme: dark) { .brand img { box-shadow: 0 0 0 1px var(--hair); } }
-/* On a phone the sections are a scroll away: only Download stays beside the name. */
+.top nav a.in { color: var(--ink); }
+/* On a phone the sections are a scroll away: only Log in and Start free stay beside the name. */
 @media (max-width: 560px) {
   .top .wrap { flex-wrap: nowrap; }
-  .top nav a:not(.dl) { display: none; }
+  .top nav a:not(.dl):not(.in) { display: none; }
 }
 
 /* ------------------------------------------------------------ type */
@@ -85,21 +86,25 @@ section { padding: 56px 0; }
 .btn svg { width: 20px; height: 20px; flex: none; }
 
 /* ------------------------------------------------------------ hero */
-.hero { padding: 28px 0 40px; }
-.hero .wrap { display: grid; gap: 40px; align-items: center; }
+.hero { padding: 36px 0 40px; }
+.hero h1 { max-width: 15em; }
 .facts { list-style: none; padding: 0; margin: 22px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .facts li { background: var(--surface); box-shadow: var(--e1); border-radius: 999px; padding: 6px 13px; font-size: 13.5px; font-weight: 600; color: var(--body); }
 @media (prefers-color-scheme: dark) { .facts li { border: 1px solid var(--hair); } }
-.hero-shot { justify-self: center; width: min(320px, 100%); }
-@media (min-width: 860px) {
-  .hero .wrap { grid-template-columns: 1.25fr 1fr; }
-  .hero-shot { justify-self: end; }
-}
 
 /* A screen from the app, in a soft frame. */
 .shot { background: var(--surface); border-radius: 30px; padding: 10px; box-shadow: var(--e3); }
 .shot img { border-radius: 22px; width: 100%; }
 .caption { font-size: 13px; color: var(--muted); text-align: center; margin: 12px 0 0; }
+
+/* The app on a computer: wider than the text, in a thinner frame. */
+.desk { max-width: 1240px; margin: 46px auto 0; padding: 0 var(--gutter); }
+.desk .shot, .wide-shot .shot { border-radius: 20px; padding: 7px; }
+.desk .shot img, .wide-shot .shot img { border-radius: 14px; }
+.wide-shot { margin: 0 0 34px; }
+.wide-shot figcaption { margin-top: 14px; }
+.wide-shot figcaption strong { display: block; color: var(--ink); font-size: 16px; letter-spacing: -.02em; }
+.wide-shot figcaption span { color: var(--muted); font-size: 14.5px; }
 
 .screens { display: grid; gap: 22px; grid-template-columns: 1fr; }
 .screens figure { margin: 0; }
@@ -135,6 +140,8 @@ section { padding: 56px 0; }
 .price h3 { margin-top: 14px; }
 .price p { margin: 6px 0 0; color: var(--body); font-size: 15px; }
 .price.free .amount { color: var(--ok); }
+/* A plan whose price is not set yet, as the app says it: as tall as a price, so the cards line up. */
+.price .soon { display: inline-block; font-size: 30px; line-height: 44px; font-weight: 800; letter-spacing: -.045em; color: var(--muted); }
 @media (min-width: 760px) { .prices { grid-template-columns: repeat(3, 1fr); } }
 .note { background: var(--surface); border-radius: 20px; box-shadow: var(--e1); padding: 18px 20px; margin-top: 12px; }
 .note p { margin: 0; }

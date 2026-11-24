@@ -1,7 +1,9 @@
 # The website
 
-The public website where tutors read about the app and download it: the home page (`index.html`),
-a privacy policy and terms of use (both drafts), and a page for addresses that do not exist (`404.html`).
+The public website where tutors read about the app and open it: the home page (`index.html`), a
+privacy policy and terms of use (both drafts), and a page for addresses that do not exist (`404.html`).
+It goes online with the web app, which sits under `app/` on the same address: Log in and Start free
+open it there (`app/#/login`, `app/#/signup`).
 
 Plain HTML and one stylesheet in the app's own look (its colours, its Geist fonts, its soft cards).
 No scripts, no cookies, no tracking, no build step, and nothing on any page moves. Light and dark
@@ -19,11 +21,10 @@ Then open http://127.0.0.1:8099/.
 
 Everything still to be filled in is marked on the pages: `FILL-IN` in the text, shown in orange.
 
-1. **The download link.** In `index.html`, the Download section links to
-   `https://github.com/OWNER/REPO/releases/latest/download/APP.apk`. Replace it with the link
-   `tools/release-app.ps1` prints at the end. That address always serves the newest release, so a
-   new release needs no change here. The repository has to be public.
-2. **The contact email**, in the footer of every page and in the privacy policy and terms.
+1. **The plan prices.** Basic and Pro say "Price soon", as the app does, until their prices are set
+   in the developer app (Settings, Plans); a comment in the Pricing section says what to write then.
+2. **The contact email**, in the footer of every page (a comment on the home page, until there is one)
+   and in the privacy policy and terms.
 3. **The privacy policy and terms** (`privacy.html`, `terms.html`). They are drafts. They describe
    what the app really does, checked against the code, and leave every decision (refunds, the law,
    parents' consent, how long payment records are kept, who runs the business) as a `FILL-IN`. Have
@@ -35,15 +36,13 @@ Everything still to be filled in is marked on the pages: `FILL-IN` in the text, 
    `node tools/rename-product.mjs "New Name"` renames the apps, the server's messages and these
    pages in one go, and `--check` says whether they agree.
 
-## Put it online with GitHub Pages
+## Online, with the web app
 
-The repository publishes this folder itself, with `.github/workflows/website.yml`. The workflow
-runs only when started by hand, so nothing goes public before the list above is done.
-
-1. Once: Settings → Pages → Build and deployment → Source: **GitHub Actions**.
-2. When the site is ready: Actions → **Website** → **Run workflow**. Run it again after changing a page.
-3. The site appears at `https://OWNER.github.io/REPO/`. A custom domain can be added in
-   Settings → Pages later.
+`.github/workflows/web-app.yml` puts this folder on Cloudflare Pages together with the web app: these
+pages at the address itself and the app under `app/`. Every push to main that touches the website or
+the app updates the dev site, https://dev.anytutor.pages.dev (kept out of search engines by Cloudflare);
+the live one, https://anytutor.pages.dev, is a run started by hand once the live server is up. This
+README stays out of the upload.
 
 `404.html` carries its own styles, so it still looks right for a missing address deep inside the
 site. Its link back to the home page is relative, which is right for an address one level down.
@@ -57,21 +56,24 @@ then:
 python tools/website-pictures.py
 ```
 
-It needs Python with Pillow. It cuts each screen to 1080 × 2400 from the top, scales it to 540 wide,
-and copies the app's icon and fonts here.
+It needs Python with Pillow. It cuts each phone screen to 1080 × 2400 from the top and scales it to 540
+wide, scales the pictures of the app on a computer (`desk-*`, from the test "desk: the app on a computer")
+to 2400 wide, and copies the app's icon and fonts here. `--desk` makes the computer pictures alone.
 
 ## What the pages claim, and where it was checked (22 November 2026)
 
 Re-check these when the app changes.
 
-- **Android 7 and newer:** `minSdk = flutter.minSdkVersion` (24) in `app/android/app/build.gradle.kts`. No iPhone app.
+- **Runs in a browser, nothing to install:** the web version (the main README, "The web version"), on a computer, a
+  tablet or a phone. A window at least 1024 wide gets the sidebar (`app/lib/ui/desk.dart`). The page no longer offers
+  the Android app: its download link waits for a release (`tools/release-app.ps1`).
 - **A PDF of up to 20 pages:** the paper source "Pick a PDF · Up to 20 pages".
 - **English, Hindi and Tamil papers; a printed answer key comes first; two AI models answer and a third settles a tie.**
 - **What waits for the tutor:** AI answers that disagree, a figure AI needs, a part it could not read (the paper check screen).
 - **Opening and closing times, a time limit, and "Mix the questions up for each student"** (a switch, so "if you choose").
 - **Marks and the right answers as soon as a student hands in** (the test settings screen says so).
 - **The student page:** average marks, weakest chapters, tests written and missed.
-- **Students make their own accounts**, with a username and password or with Google (`app/lib/features/auth/signup_screen.dart`, `google_flow.dart`), and ask to join with the link or QR code a tutor shares for a group or course (`app/lib/features/teacher/invite_screen.dart`), or with the tuition's code; a tutor lets them in. The app keeps no email address (`api/src/lib/google.ts` keeps only Google's account number and the name).
+- **Students make their own accounts**, with a username and password (`app/lib/features/auth/signup_screen.dart`; Google too in the Android app, `google_flow.dart`, not yet in a browser), and ask to join with the tuition's code, or the link or QR code a tutor shares for a group or course (`app/lib/features/teacher/invite_screen.dart`); a tutor lets them in. The app keeps no email address (`api/src/lib/google.ts` keeps only Google's account number and the name).
 - **Invite students with a link or a QR code:** Invite students on a group's or course's page.
 - **Other tutors** are added from the app, each with a login of their own.
 - **Plans:** Free (20 students, 1 tutor, ₹20 of AI to start), Basic (100 students, 3 tutors, ₹300 of AI a month) and Pro (300 students, 10 tutors, ₹900 of AI a month), from `api/migrations/040_plans.sql`. Sizes and prices are set in the developer app (Settings, Plans); **the Pricing section's plan prices are FILL-INs until they are set there**, and when anything changes, change the Pricing section too.

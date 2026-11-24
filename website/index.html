@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>AnyTutor: tests from your own question papers</title>
-<meta name="description" content="An Android app for tuition teachers. AI reads your question paper and turns it into a test your students write on their phones. Marked the moment they hand in.">
+<meta name="description" content="For tuition teachers. AI reads your question paper and turns it into a test your students write on a phone or a computer, marked the moment they hand in. Runs in your browser.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="img/icon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="img/icon-192.png">
@@ -20,7 +20,8 @@
       <a href="#how">How it works</a>
       <a href="#pricing">Pricing</a>
       <a href="#questions">Questions</a>
-      <a class="dl" href="#download">Download</a>
+      <a class="in" href="app/#/login">Log in</a>
+      <a class="dl" href="app/#/signup">Start free</a>
     </nav>
   </div>
 </header>
@@ -28,33 +29,31 @@
 <main id="main">
   <section class="hero">
     <div class="wrap">
-      <div>
-        <p class="kick">For tuition teachers</p>
-        <h1>Photograph a question paper. Hand out the test.</h1>
-        <p class="lead">AnyTutor reads your question paper with AI and turns it into a multiple-choice test your students write on their phones. Every answer is marked the moment a student hands in, and you see which chapters each student finds hard.</p>
-        <div class="btns">
-          <a class="btn" href="#download">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></svg>
-            Download for Android
-          </a>
-          <a class="btn second" href="#how">See how it works</a>
-        </div>
-        <ul class="facts" aria-label="At a glance">
-          <li>Android 7 and newer</li>
-          <li>Students need no email or phone number</li>
-          <li>Free for up to 20 students</li>
-        </ul>
+      <p class="kick">For tuition teachers</p>
+      <h1>Photograph a question paper. Hand out the test.</h1>
+      <p class="lead">AnyTutor reads your question paper with AI and turns it into a multiple-choice test your students write on a phone or a computer. Every answer is marked the moment a student hands in, and you see which chapters each student finds hard.</p>
+      <div class="btns">
+        <a class="btn" href="app/#/signup">
+          Start free
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m0 0-5.5-5.5M19 12l-5.5 5.5"/></svg>
+        </a>
+        <a class="btn second" href="app/#/login">Log in</a>
       </div>
-      <figure class="hero-shot" style="margin:0">
-        <div class="shot">
-          <picture>
-            <source srcset="img/tutor-home-dark.png" media="(prefers-color-scheme: dark)">
-            <img src="img/tutor-home-light.png" alt="The tutor's home screen: groups with their live tests and how many students have handed in." width="540" height="1200">
-          </picture>
-        </div>
-        <figcaption class="caption">The tutor's home screen, with sample names.</figcaption>
-      </figure>
+      <ul class="facts" aria-label="At a glance">
+        <li>Runs in your browser, nothing to install</li>
+        <li>Students need no email or phone number</li>
+        <li>Free for up to 20 students</li>
+      </ul>
     </div>
+    <figure class="desk">
+      <div class="shot">
+        <picture>
+          <source srcset="img/desk-home-dark.png" media="(prefers-color-scheme: dark)">
+          <img src="img/desk-home-light.png" alt="The tutor's Home on a computer: the tests open now and how many students have handed them in, the tests coming up and finished lately, what needs the tutor, and the groups and courses." width="2400" height="1500">
+        </picture>
+      </div>
+      <figcaption class="caption">The tutor's Home on a computer, with sample names.</figcaption>
+    </figure>
   </section>
 
   <section id="how">
@@ -66,9 +65,9 @@
       <ol class="steps">
         <li class="step"><h3>Add the paper</h3><p>Take a photo of each page, choose photos you already took, or pick a PDF of up to 20 pages. Add the answer key at the end if the paper has one. No paper at hand? Describe the test and AI writes the questions.</p></li>
         <li class="step"><h3>AI reads it</h3><p>It finds each question and its options, page by page, and works out the answers. A printed answer key always comes first.</p></li>
-        <li class="step"><h3>Check what it is unsure about</h3><p>Questions it is sure of are ready. The rest wait in a short list for you: two AI checks that disagree, a figure it cannot see, a line it could not read. One tap settles each.</p></li>
-        <li class="step"><h3>Post it to your students</h3><p>Choose which students write it, a time limit, and when it opens and closes. Students find it in the app once it opens.</p></li>
-        <li class="step"><h3>Students write it on their phones</h3><p>One question at a time, and you can mix the questions up for each student. When a student hands in, their marks and the right answers appear at once.</p></li>
+        <li class="step"><h3>Check what it is unsure about</h3><p>Questions it is sure of are ready. The rest wait in a short list for you: two AI checks that disagree, a figure it cannot see, a line it could not read. One click settles each.</p></li>
+        <li class="step"><h3>Post it to your students</h3><p>Choose which students write it, a time limit, and when it opens and closes. Students find it in AnyTutor once it opens.</p></li>
+        <li class="step"><h3>Students write it on a phone or a computer</h3><p>One question at a time, and you can mix the questions up for each student. When a student hands in, their marks and the right answers appear at once.</p></li>
         <li class="step"><h3>See who needs help</h3><p>Each student has a page with their average, their weakest chapters and the tests they missed. If an answer key was wrong, fix it once and everyone is marked again.</p></li>
       </ol>
     </div>
@@ -78,8 +77,13 @@
     <div class="wrap">
       <div class="section-head">
         <p class="kick">The app</p>
-        <h2 id="screens-title">Made for a phone, for tutors and students alike.</h2>
+        <h2 id="screens-title">On a computer or a phone, for tutors and students alike.</h2>
+        <p>On a computer your whole tuition sits beside a sidebar, with tests and students in tables you can click through. On a phone it is laid out for one hand.</p>
       </div>
+      <figure class="wide-shot">
+        <div class="shot"><picture><source srcset="img/desk-group-dark.png" media="(prefers-color-scheme: dark)"><img src="img/desk-group-light.png" alt="A group's page on a computer: its tests in a table, with each test's state, when it opens or closes, and how many students handed it in." width="2400" height="1500" loading="lazy"></picture></div>
+        <figcaption><strong>A group's page</strong><span>Every test, when it opens or closes, and who has handed it in.</span></figcaption>
+      </figure>
       <div class="screens">
         <figure>
           <div class="shot"><picture><source srcset="img/paper-check-dark.png" media="(prefers-color-scheme: dark)"><img src="img/paper-check-light.png" alt="A question paper after AI has read it: the questions ready, and the ones that need the tutor." width="540" height="1200" loading="lazy"></picture></div>
@@ -130,7 +134,7 @@
         <h2>Start free. Move up as you grow.</h2>
         <p>Tests, marking, results, ready-made questions, attendance, fees, the timetable and the Library work on every plan. A plan sets how many students and tutors your tuition can have, and how much AI work comes with it.</p>
       </div>
-      <!-- FILL-IN: once a plan has its price in the developer app, replace its marker with <span class="amount">₹…</span>, as Free's ₹0 is written. -->
+      <!-- FILL-IN: once a plan has its price in the developer app, replace its "Price soon" with <span class="amount">₹…</span><span class="per">a month</span>, as Free's ₹0 is written. -->
       <div class="prices">
         <div class="price free">
           <div><span class="amount">₹0</span><span class="per">free</span></div>
@@ -139,13 +143,13 @@
           <p>₹20 of AI to start, about 8 pages.</p>
         </div>
         <div class="price">
-          <div><span class="fill">FILL-IN price</span><span class="per">a month</span></div>
+          <div><span class="soon">Price soon</span></div>
           <h3>Basic</h3>
           <p>Room for 100 students and 3 tutors.</p>
           <p>₹300 of AI every month, about 125 pages.</p>
         </div>
         <div class="price">
-          <div><span class="fill">FILL-IN price</span><span class="per">a month</span></div>
+          <div><span class="soon">Price soon</span></div>
           <h3>Pro</h3>
           <p>Room for 300 students and 10 tutors.</p>
           <p>₹900 of AI every month, about 375 pages.</p>
@@ -154,7 +158,8 @@
       <div class="note">
         <p>AI reads question papers (₹2.40 a page), writes questions when you describe a test (₹0.60 a question) and writes worked solutions (₹0.40 each). The app shows the price before every AI job, and only finished work counts: a page AI could not read costs nothing. Unused AI does not carry over to the next month.</p>
         <p>Pay for a plan in the app by UPI, for 1, 3, 6 or 12 months. It starts once the payment has been checked. When it ends you are on Free again: nobody is turned off and nothing is deleted.</p>
-        <p class="small">Prices as of <span class="fill">FILL-IN month</span>. The app always shows the current price.</p>
+        <!-- FILL-IN: "Prices as of <month>." before the sentence below, once the plans have prices. -->
+        <p class="small">The app always shows the current price.</p>
       </div>
     </div>
   </section>
@@ -166,40 +171,40 @@
         <h2>Before you start.</h2>
       </div>
       <div class="faq">
-        <details><summary>Do my students need an email or a phone number?</summary><p>No. Students make their own account in the app, with a username and a password or with Google, and the app keeps no email address or phone number. You share a group's or course's link or QR code; they ask to join, and you choose whether to let them in.</p></details>
+        <details><summary>What do I need to use it?</summary><p>A browser, on a computer, a tablet or a phone. Open AnyTutor and log in: there is nothing to install. On a computer your tuition sits beside a sidebar; on a phone it is laid out for the small screen. Your students use it the same way.</p></details>
+        <details><summary>Do my students need an email or a phone number?</summary><p>No. Students make their own account with a username and a password, and AnyTutor keeps no email address or phone number. Give them your tuition's join code, or a group's or course's link or QR code; they ask to join, and you choose whether to let them in.</p></details>
         <details><summary>Is the AI always right?</summary><p>No, so you stay in charge. A printed answer key comes first; otherwise two AI models answer each question and a third settles a tie. Anything still unsure waits for you to check before the test goes out. If an answer turns out wrong later, fix it on the test's page and every student is marked again.</p></details>
         <details><summary>What does the AI in a plan pay for?</summary><p>Three things: AI reading the pages of a question paper (₹2.40 a page), AI writing questions when you describe a test (₹0.60 a question) and AI writing worked solutions (₹0.40 each). Free comes with ₹20 of AI to start; Basic and Pro come with AI every month. Everything else works on every plan.</p></details>
         <details><summary>What happens when the month's AI runs out?</summary><p>AI work waits until your plan's next month, or until you move to a bigger plan. Tests, students and results keep working as usual.</p></details>
         <details><summary>What if my tuition outgrows its plan?</summary><p>Everyone already in stays in. Letting more students or tutors in waits until you move to a bigger plan.</p></details>
-        <details><summary>How do I pay?</summary><p>In the app, open Settings, then Plan. Choose a plan and how many months, pay by UPI to the UPI id it shows with the code it gives you in the payment note, then tap I have paid. The plan starts once the payment has been checked.</p></details>
-        <details><summary>Which phones does it work on?</summary><p>Android phones with Android 7 or newer. There is no iPhone app yet.</p></details>
-        <details><summary>Can other tutors at my tuition use it too?</summary><p>Yes. Add the other tutors from the app, and each gets a login of their own.</p></details>
-        <details><summary>Can I delete my tuition?</summary><p>Yes. The owner can delete the tuition, and everything in it, from Settings in the app, once any payment for a plan has been checked. See the <a href="privacy.html">privacy policy</a> for what is kept and what is deleted.</p></details>
+        <details><summary>How do I pay?</summary><p>In AnyTutor, open Plan (on a phone it is in Settings). Choose a plan and how many months, pay by UPI to the UPI id it shows with the code it gives you in the payment note, then click I have paid. The plan starts once the payment has been checked.</p></details>
+        <details><summary>Can other tutors at my tuition use it too?</summary><p>Yes. Add the other tutors from Settings, and each gets a login of their own.</p></details>
+        <details><summary>Can I delete my tuition?</summary><p>Yes. The owner can delete the tuition, and everything in it, from Settings, once any payment for a plan has been checked. See the <a href="privacy.html">privacy policy</a> for what is kept and what is deleted.</p></details>
       </div>
     </div>
   </section>
 
-  <section id="download">
+  <section id="start">
     <div class="wrap download">
       <div>
-        <p class="kick">Download</p>
-        <h2>Get the app.</h2>
-        <p class="lead">The app is installed from this page rather than from the Play Store. It updates itself after the first install.</p>
+        <p class="kick">Start</p>
+        <h2>Open it in your browser.</h2>
+        <p class="lead">There is nothing to install. Make your tuition's account, and it is ready for your first question paper.</p>
         <div class="btns">
-          <a class="btn" href="https://github.com/OWNER/REPO/releases/latest/download/APP.apk">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11m0 0-4.5-4.5M12 15l4.5-4.5M5 19.5h14"/></svg>
-            Download for Android
+          <a class="btn" href="app/#/signup">
+            Start free
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14m0 0-5.5-5.5M19 12l-5.5 5.5"/></svg>
           </a>
+          <a class="btn second" href="app/#/login">Log in</a>
         </div>
-        <p class="small" style="margin-top:12px">For Android 7 and newer.</p>
       </div>
       <div class="note" style="margin-top:0">
-        <h3 style="margin-bottom:14px">Installing it</h3>
+        <h3 style="margin-bottom:14px">Your first test</h3>
         <ol class="install">
-          <li>Open this page on your Android phone and tap <strong>Download for Android</strong>.</li>
-          <li>When it has downloaded, open the file.</li>
-          <li>If Android asks, allow your browser to install apps.</li>
-          <li>Tap <strong>Install</strong>, then open the app and sign up as a tutor.</li>
+          <li>Click <strong>Start free</strong> and make your tuition's account.</li>
+          <li>Add a group, like 10th Maths, or a course.</li>
+          <li>Give your students your tuition's join code. They make their own accounts and ask to join; you let them in.</li>
+          <li>Click <strong>Make tests</strong> and add your first question paper.</li>
         </ol>
       </div>
     </div>
@@ -211,7 +216,7 @@
     <span class="grow">© 2026 AnyTutor</span>
     <a href="privacy.html">Privacy</a>
     <a href="terms.html">Terms</a>
-    <span>Contact: <span class="fill">FILL-IN contact email</span></span>
+    <!-- FILL-IN: <span>Contact: the contact email</span>, once there is one. -->
   </div>
 </footer>
 </body>

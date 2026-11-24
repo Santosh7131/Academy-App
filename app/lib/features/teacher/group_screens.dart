@@ -8,9 +8,11 @@ import '../../core/format.dart' as f;
 import '../../core/timetable.dart';
 import '../../core/library.dart';
 import '../../theme.dart';
+import '../../ui/desk.dart';
 import '../../ui/kit.dart';
 import 'common.dart';
 import 'attendance_screens.dart';
+import 'desk_class.dart';
 import 'timetable_screens.dart';
 import 'credit_screens.dart' show CreditPill, PricedAction;
 import 'library_tab.dart';
@@ -168,9 +170,68 @@ class _GroupScreenState extends State<GroupScreen> with WidgetsBindingObserver, 
     }
   }
 
+  /// The group's page in a computer's browser: its buttons across the top, the tabs, and the chosen tab across the page.
+  Widget _desk(Map<String, dynamic>? d) {
+    final students = ((d?['students'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final tests = ((d?['tests'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final files = _n(d?['library']);
+    final ref = ClassRef.group(widget.classLevel, widget.subjectId);
+    return Scaffold(
+      body: DeskScroll(children: [
+        DeskHead(
+          crumb: 'Groups & courses',
+          onCrumb: () => context.go('/t/classes'),
+          kicker: 'Group',
+          title: _name,
+          actions: [
+            DeskButton('Make tests', icon: Ph.plus, filled: true, onTap: _makeTest),
+            if (d != null && d.containsKey('attendance_today')) DeskButton('Attendance', icon: Ph.listChecks, onTap: () => _go(ref.link(_name))),
+            if (d != null && d.containsKey('times')) DeskButton('Timetable', icon: Ph.calendarBlank, onTap: () => _go(timetableLink(ref, _name))),
+            DeskButton('Invite students', icon: Ph.linkSimple, onTap: () => _go('/t/invite?$_query')),
+          ],
+        ),
+        if (d == null && _error != null)
+          ErrorState(message: _error!, onRetry: _load)
+        else if (d == null)
+          const LoadingState(rows: 3)
+        else ...[
+          deskTabs(
+            labels: const ['Tests', 'Library', 'Students'],
+            counts: [tests.length, files > 0 ? files : null, students.length],
+            index: _tab,
+            onChanged: (i) => setState(() => _tab = i),
+          ),
+          const SizedBox(height: 18),
+          if (_tab == 0)
+            ...deskClassTests(
+              tests,
+              allFinished: _allFinished,
+              onToggleFinished: () => setState(() => _allFinished = !_allFinished),
+              go: _go,
+              empty: 'Click Make tests above. Students you add on the Students tab can take them.',
+            )
+          else if (_tab == 1)
+            Align(
+              alignment: Alignment.topLeft,
+              child: SizedBox(width: deskColumn, child: LibraryTab(shelf: LibShelf.group(widget.classLevel, widget.subjectId), className: _name, reload: _loads)),
+            )
+          else if (students.isEmpty)
+            Fig("No students in this group yet. Invite them with the group's link or QR code.", style: bodyStyle.copyWith(color: muted))
+          else
+            deskPeople(students, open: (s) => _go('/t/students/${s['id']}')),
+          if (students.isEmpty && tests.isEmpty && files == 0) ...[
+            const SizedBox(height: 22),
+            Align(alignment: Alignment.centerLeft, child: TextAction('Remove this group', color: danger, onTap: _remove)),
+          ],
+        ],
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final d = _d;
+    if (onDesk(context)) return _desk(d);
     return PushedPanel(
       onRefresh: _load,
       kicker: 'Group',

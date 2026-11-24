@@ -57,6 +57,9 @@ import 'package:tuition_app/features/teacher/tests_screens.dart';
 import 'package:tuition_app/features/teacher/timetable_screens.dart' show ClassTimeScreen, TimetableScreen;
 import 'package:tuition_app/features/teacher/worked_solutions.dart' show WorkedSolutions;
 import 'package:tuition_app/theme.dart';
+import 'package:tuition_app/features/desk_frame.dart';
+import 'package:tuition_app/router.dart' show buildRouter;
+import 'package:tuition_app/ui/desk.dart' show deskAllowed;
 import 'package:tuition_app/ui/kit.dart' show Pressable, SecondaryButton;
 import 'package:tuition_app/ui/picture.dart' show pngOf;
 import 'package:tuition_app/ui/qr.dart' show qrPicture;
@@ -283,11 +286,11 @@ Future<void> _settle(WidgetTester t) async {
   }
 }
 
-Future<void> _shot(WidgetTester t, String name) async {
+Future<void> _shot(WidgetTester t, String name, {double ratio = _ratio}) async {
   if (!_shots) return;
   await t.runAsync(() async {
     final boundary = t.renderObject<RenderRepaintBoundary>(find.byKey(_boundary));
-    final image = await boundary.toImage(pixelRatio: _ratio);
+    final image = await boundary.toImage(pixelRatio: ratio);
     final data = await image.toByteData(format: ui.ImageByteFormat.png);
     File('../tools/out/shots/$name${_landscape ? '-land' : ''}.png')
       ..createSync(recursive: true)
@@ -303,6 +306,40 @@ Future<void> _both(WidgetTester t, String name, Widget Function() screen, {doubl
     await _shot(t, '$name-${dark ? 'dark' : 'light'}');
     await t.pumpWidget(const SizedBox.shrink()); // dispose: stops the screens' refresh timers
   }
+}
+
+/// The app as a computer's browser shows it, 1440 by 900: the real router and the frame with its sidebar (features/desk_frame.dart),
+/// opened at [location], answers from the stub server. Returns the router, to move it on; dispose of it when the scene is done.
+Future<GoRouter> _showDesk(WidgetTester t, String location, {bool dark = false}) async {
+  setResolvedDark(dark);
+  deskAllowed = true;
+  // A computer starts with a mouse and a keyboard: hover and the keyboard's ring show (a test is a phone without this).
+  FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTraditional;
+  final restored = session.restored, splashDone = session.splashDone;
+  session.restored = true;
+  session.splashDone = true;
+  addTearDown(() {
+    deskAllowed = false;
+    FocusManager.instance.highlightStrategy = FocusHighlightStrategy.automatic;
+    session.restored = restored;
+    session.splashDone = splashDone;
+  });
+  t.view.physicalSize = const Size(2880, 1800);
+  t.view.devicePixelRatio = 2;
+  addTearDown(t.view.reset);
+  final router = buildRouter();
+  await t.pumpWidget(RepaintBoundary(
+    key: _boundary,
+    child: MaterialApp.router(
+      debugShowCheckedModeBanner: false,
+      theme: _theme(dark),
+      routerConfig: router,
+      builder: (context, child) => DeskFrame(router: router, child: child!),
+    ),
+  ));
+  router.go(location);
+  await _settle(t);
+  return router;
 }
 
 /// What GET /join/:code shows of a group's link.
@@ -1635,6 +1672,96 @@ void main() {
       await t.tap(find.text('Students'));
       await _settle(t);
     });
+  });
+
+  // ---- the app in a computer's browser (design/comps/desktop/*.html): the sidebar, Home laid out wide, a group's page with its tests
+  // as a table, and a page that keeps to the column. The website shows these pictures (website/img/desk-*.png).
+  shotTest('desk: the app on a computer', (t) async {
+    _sessionAs(role: 'teacher', tuitions: tutorTuition);
+    routes['/teacher/home'] = (_) => busyHome();
+    routes['/teacher/groups/10/sub-Maths'] = (_) => {
+          'students': [
+            for (final (i, n) in people.take(12).indexed)
+              {
+                'id': 's$i', 'display_name': n, 'username': 'u$i', 'active': i != 11, 'last_seen_at': _iso(Duration(hours: -i)),
+                'avg_pct': i < 3 ? null : 0.5 + i / 40, 'tests_done': i < 3 ? 0 : 2,
+              },
+          ],
+          'tests': [
+            courseTest('g1', 'Practice Paper 2', closes: const Duration(hours: 3), submitted: 7, writing: 2, assigned: 12),
+            courseTest('g2', 'Real Numbers test', opens: const Duration(days: 5), closes: const Duration(days: 5, hours: 13), assigned: 12),
+            courseTest('g3', 'Polynomials', status: 'draft'),
+            courseTest('g0', 'Quadratic equations', closes: const Duration(days: -3), submitted: 12, assigned: 12),
+            courseTest('g4', 'Triangles', closes: const Duration(days: -8), submitted: 11, assigned: 12),
+          ],
+          'attendance_today': null,
+          'times': <Object?>[],
+        };
+    for (final dark in [false, true]) {
+      final mode = dark ? 'dark' : 'light';
+      final router = await _showDesk(t, '/t', dark: dark);
+      await _shot(t, 'desk-home-$mode', ratio: 2);
+      if (!dark) {
+        // The pointer over a row of a table, and over the card of a test that is open.
+        final mouse = await t.createGesture(kind: ui.PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        await mouse.moveTo(t.getCenter(find.text('Unit 2 quiz')));
+        await t.pump();
+        await _shot(t, 'desk-home-hover-row', ratio: 2);
+        await mouse.moveTo(t.getCenter(find.text('Practice Paper 2')));
+        await t.pump();
+        await _shot(t, 'desk-home-hover-card', ratio: 2);
+        await mouse.removePointer();
+      }
+      router.go('/t/groups/10/sub-Maths?name=Maths');
+      await _settle(t);
+      await _shot(t, 'desk-group-$mode', ratio: 2);
+      await t.tap(find.text('Students'));
+      await _settle(t);
+      await _shot(t, 'desk-group-students-$mode', ratio: 2);
+      router.go('/t/classes');
+      await _settle(t);
+      await _shot(t, 'desk-classes-$mode', ratio: 2);
+      if (!dark) {
+        // The keyboard: Tab moves from one thing to click to the next, with a ring round the one it is on.
+        for (var i = 0; i < 3; i++) {
+          await t.sendKeyEvent(LogicalKeyboardKey.tab);
+        }
+        await t.pump();
+        await _shot(t, 'desk-focus', ratio: 2);
+      }
+      await t.pumpWidget(const SizedBox.shrink());
+      router.dispose();
+    }
+    // A student: Home in the column, with the sidebar's four.
+    _sessionAs(role: 'student', tuitions: [{'id': 't-1', 'name': 'Priya Maths Classes', 'role': 'student', 'status': 'active', 'class_level': 9}]);
+    routes['/student/home'] = (_) => {
+          'server_now': _iso(Duration.zero),
+          'tuition': {'id': 't-1', 'name': 'Priya Maths Classes'},
+          'tests': [
+            {
+              'id': 'a', 'title': 'Linear equations', 'class_level': 9, 'time_limit_min': 20, 'opens_at': null, 'closes_at': _iso(const Duration(hours: 5)),
+              'question_count': 12, 'max_marks': 12, 'state': 'open', 'retake': false, 'results_open': true, 'attempt': null,
+            },
+            {
+              'id': 'b', 'title': 'Number systems', 'class_level': 9, 'time_limit_min': 15, 'opens_at': null, 'closes_at': _iso(const Duration(days: -1)),
+              'question_count': 10, 'max_marks': 10, 'state': 'done', 'retake': false, 'results_open': true,
+              'attempt': {'id': 'att', 'attempt_no': 1, 'submitted_at': _iso(const Duration(days: -1, hours: -2)), 'deadline_at': null, 'score': 8, 'max_score': 10},
+            },
+          ],
+        };
+    final student = await _showDesk(t, '/s');
+    await _shot(t, 'desk-student-light', ratio: 2);
+    await t.pumpWidget(const SizedBox.shrink());
+    student.dispose();
+    // Signed out: the login page in a narrow column of its own, with no sidebar.
+    api.token = null;
+    session.user = null;
+    GoogleAuth.pretend(null);
+    final router = await _showDesk(t, '/login');
+    await _shot(t, 'desk-login-light', ratio: 2);
+    await t.pumpWidget(const SizedBox.shrink());
+    router.dispose();
   });
 
   // Making tests from several papers at once: which class, the papers, the days, the reading, the check, the posting, the end. The

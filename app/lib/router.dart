@@ -21,10 +21,12 @@ import 'features/student/test_screen.dart';
 import 'features/teacher/fees_screens.dart' show ReceiptScreen;
 import 'features/teacher/setup_screen.dart';
 import 'features/teacher/teacher_routes.dart';
+import 'ui/desk.dart';
 
-/// Each screen fades in over the one before it: the theme's fade-forwards transition.
+/// Each screen fades in over the one before it: the theme's fade-forwards transition. Beside a computer's sidebar it keeps to a
+/// column in the middle (ui/desk.dart).
 GoRoute page(String path, Widget Function(GoRouterState s) build) =>
-    GoRoute(path: path, pageBuilder: (c, s) => MaterialPage(key: s.pageKey, child: build(s)));
+    GoRoute(path: path, pageBuilder: (c, s) => MaterialPage(key: s.pageKey, child: DeskPage(child: build(s))));
 
 /// In a browser a page can be reloaded on any screen. The address it was on is kept while the app starts, and a person still signed
 /// in goes back to it instead of Home. (A phone app always starts at Home.)
@@ -47,7 +49,10 @@ GoRouter buildRouter() => GoRouter(
         if (loc == '/update') return session.signedIn ? (session.isTeacher ? '/t' : '/s') : '/login';
         const signedOut = {'/login', '/signup', '/signup/student'};
         if (!session.signedIn) {
+          final back = _resumeAt;
           _resumeAt = null;
+          // A browser opened on the sign-up page (the website's Start free) or the login goes there once the app has started.
+          if (loc == '/start' && back != null && signedOut.contains(Uri.parse(back).path)) return back;
           return signedOut.contains(loc) ? null : '/login';
         }
         final teacher = session.isTeacher;

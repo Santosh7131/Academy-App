@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../ui/desk.dart';
 import '../../ui/floating_tabs.dart';
 import '../../ui/kit.dart';
 
@@ -23,15 +24,17 @@ class TeacherShell extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
         body: Stack(children: [
           Positioned.fill(child: shell),
-          FloatingTabs.positioned(
-            context,
-            child: FloatingTabs(
-              items: _items,
-              weights: _weights,
-              index: shell.currentIndex,
-              onTap: (i) => shell.goBranch(i, initialLocation: i == shell.currentIndex),
+          // Beside a computer's sidebar the sidebar has these three, and the bar stays away.
+          if (!onDesk(context))
+            FloatingTabs.positioned(
+              context,
+              child: FloatingTabs(
+                items: _items,
+                weights: _weights,
+                index: shell.currentIndex,
+                onTap: (i) => shell.goBranch(i, initialLocation: i == shell.currentIndex),
+              ),
             ),
-          ),
         ]),
       );
 }

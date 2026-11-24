@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../core/api.dart';
 import '../../core/google.dart';
@@ -115,6 +116,8 @@ class _SignUpState extends State<_SignUp> {
 
   @override
   Widget build(BuildContext context) => PushedPanel(
+        // Opened straight from the website's Start free, there is no login under it to go back to: Back opens the login.
+        onBack: Navigator.of(context).canPop() ? null : () => context.go('/login'),
         kicker: _student ? 'New student' : 'New tutor',
         title: 'Make your account',
         children: [

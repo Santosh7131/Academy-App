@@ -8,8 +8,10 @@ import '../../core/levels.dart';
 import '../../core/timetable.dart';
 import '../../core/library.dart';
 import '../../theme.dart';
+import '../../ui/desk.dart';
 import '../../ui/kit.dart';
 import 'attendance_screens.dart';
+import 'desk_class.dart';
 import 'timetable_screens.dart';
 import 'common.dart';
 import 'library_tab.dart';
@@ -205,9 +207,65 @@ class _CourseScreenState extends State<CourseScreen> with WidgetsBindingObserver
     }
   }
 
+  /// The course's page in a computer's browser: its buttons across the top, the tabs, and the chosen tab across the page.
+  Widget _desk(Map<String, dynamic>? d) {
+    final people = ((d?['people'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final tests = ((d?['tests'] as List?) ?? const []).cast<Map<String, dynamic>>();
+    final files = _n(d?['library']);
+    final ref = ClassRef.course(widget.id);
+    return Scaffold(
+      body: DeskScroll(children: [
+        DeskHead(
+          crumb: 'Groups & courses',
+          onCrumb: () => context.go('/t/classes'),
+          kicker: 'Course',
+          title: _name,
+          under: d == null ? null : Align(alignment: Alignment.centerLeft, child: _RenameLink(onTap: _rename)),
+          actions: [
+            DeskButton('Make tests', icon: Ph.plus, filled: true, onTap: _makeTest),
+            if (d != null && d.containsKey('attendance_today')) DeskButton('Attendance', icon: Ph.listChecks, onTap: () => _go(ref.link(_name))),
+            if (d != null && d.containsKey('times')) DeskButton('Timetable', icon: Ph.calendarBlank, onTap: () => _go(timetableLink(ref, _name))),
+            DeskButton('Invite students', icon: Ph.linkSimple, onTap: () => _go('/t/invite?course=${widget.id}&name=${_enc(_name)}')),
+            DeskButton('Add your students', icon: Ph.userPlus, onTap: () => _go('/t/courses/${widget.id}/add?name=${_enc(_name)}')),
+          ],
+        ),
+        if (d == null && _error != null)
+          ErrorState(message: _error!, onRetry: _load)
+        else if (d == null)
+          const LoadingState(rows: 3)
+        else ...[
+          deskTabs(
+            labels: const ['Tests', 'Library', 'People'],
+            counts: [tests.length, files > 0 ? files : null, people.length],
+            index: _tab,
+            onChanged: (i) => setState(() => _tab = i),
+          ),
+          const SizedBox(height: 18),
+          if (_tab == 0)
+            ...deskClassTests(
+              tests,
+              allFinished: _allFinished,
+              onToggleFinished: () => setState(() => _allFinished = !_allFinished),
+              go: _go,
+              empty: 'Click Make tests above. People you add on the People tab can take them.',
+            )
+          else if (_tab == 1)
+            Align(alignment: Alignment.topLeft, child: SizedBox(width: deskColumn, child: LibraryTab(shelf: LibShelf.course(widget.id), className: _name, reload: _loads)))
+          else if (people.isEmpty)
+            Fig('No one is in this course yet. Invite students with its link, or add your own.', style: bodyStyle.copyWith(color: muted))
+          else
+            deskPeople(people, open: (s) => _go('/t/students/${s['id']}?course=${widget.id}&name=${_enc(_name)}')),
+          const SizedBox(height: 22),
+          Align(alignment: Alignment.centerLeft, child: TextAction('Delete this course', color: danger, onTap: _delete)),
+        ],
+      ]),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final d = _d;
+    if (onDesk(context)) return _desk(d);
     return PushedPanel(
       onRefresh: _load,
       kicker: 'Course',

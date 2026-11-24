@@ -11,6 +11,7 @@ import '../../core/links.dart';
 import '../../core/session.dart';
 import '../../core/timetable.dart';
 import '../../theme.dart';
+import '../../ui/desk.dart';
 import '../../ui/floating_tabs.dart';
 import '../../ui/kit.dart';
 import '../../ui/update_card.dart';
@@ -132,6 +133,8 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver, 
     final tabs = [_Tab.home, if (inClass && _courses.isNotEmpty) _Tab.courses, if (_shelves.isNotEmpty) _Tab.library];
     final tab = tabs.contains(_tab) ? _tab : _Tab.home;
     final bar = tabs.length > 1;
+    // Beside a computer's sidebar the tabs are a switch under the title, not a bar floating at the bottom.
+    final desk = onDesk(context);
     final coursesOnly = !inClass;
     final showCourses = tab == _Tab.courses || (tab == _Tab.home && coursesOnly);
     final kicker = inClass && tab == _Tab.home ? '${session.tuitionName} · ${className(session.classLevel)}' : session.tuitionName;
@@ -146,7 +149,7 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver, 
           child: SafeArea(
             child: PullToRefresh(
               onRefresh: _load,
-              child: ListView(padding: EdgeInsets.only(top: 8, bottom: bar ? 110 : 32), physics: const AlwaysScrollableScrollPhysics(), children: [
+              child: ListView(padding: EdgeInsets.only(top: 8, bottom: bar && !desk ? 110 : 32), physics: const AlwaysScrollableScrollPhysics(), children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: gutter),
                   child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -175,6 +178,22 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver, 
                     ),
                   ]),
                 ),
+                if (bar && desk)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(gutter, 18, gutter, 0),
+                    child: SegmentedToggle(
+                      labels: [
+                        for (final t in tabs)
+                          switch (t) {
+                            _Tab.home => 'Home',
+                            _Tab.courses => 'Courses',
+                            _Tab.library => 'Library',
+                          },
+                      ],
+                      index: tabs.indexOf(tab),
+                      onChanged: (i) => setState(() => _tab = tabs[i]),
+                    ),
+                  ),
                 const UpdateBanner(),
                 if (tests == null && _error != null)
                   ErrorState(message: _error!, onRetry: _load)
@@ -199,7 +218,7 @@ class _StudentHomeState extends State<StudentHome> with WidgetsBindingObserver, 
             ),
           ),
         ),
-        if (bar)
+        if (bar && !desk)
           FloatingTabs.positioned(
             context,
             child: FloatingTabs(

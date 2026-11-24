@@ -1,6 +1,7 @@
-# Builds the web app (README "The web version") on GitHub and puts it on Cloudflare Pages.
+# Builds the web app (README "The web version") on GitHub and puts it on Cloudflare Pages, with the website (website/):
+# the website at the address itself and the app under /app/, one origin for both.
 #
-# - Every push to main that touches the app puts a build for the dev server at https://dev.anytutor.pages.dev
+# - Every push to main that touches the app or the website puts a build for the dev server at https://dev.anytutor.pages.dev
 #   (a preview of the project: public, and kept out of search engines by Cloudflare).
 # - Actions → Web app → Run workflow does the same by hand. Choosing "live" builds for the live server and puts it at
 #   https://anytutor.pages.dev; it is refused until LIVE_API_BASE below holds the live function's address. Only someone
@@ -17,6 +18,7 @@ on:
     branches: [main]
     paths:
       - 'app/**'
+      - 'website/**'
       - 'tools/build-web.ps1'
       - 'tools/web-sri.mjs'
       - '.github/workflows/web-app.yml'
@@ -111,7 +113,19 @@ jobs:
         shell: pwsh
         env:
           API_BASE: ${{ steps.target.outputs.api }}
-        run: ./tools/build-web.ps1 -ApiBase $env:API_BASE
+        run: ./tools/build-web.ps1 -ApiBase $env:API_BASE -BaseHref /app/
+
+      # The website's pages at the root and the app in app/. The website's README is for whoever edits it, not for visitors.
+      - name: Put the website and the app together
+        run: |
+          site="$RUNNER_TEMP/site"
+          rm -rf "$site"
+          mkdir -p "$site"
+          cp -R website/. "$site/"
+          rm -f "$site/README.md" "$site/.nojekyll"
+          cp -R app/build/web "$site/app"
+          echo "SITE=$site" >> "$GITHUB_ENV"
+          ls "$site" "$site/app"
 
       - name: Put it on Cloudflare Pages
         env:
@@ -120,5 +134,5 @@ jobs:
           BRANCH: ${{ steps.target.outputs.branch }}
           URL: ${{ steps.target.outputs.url }}
         run: |
-          npx --yes "wrangler@$WRANGLER_VERSION" pages deploy app/build/web --project-name="$PAGES_PROJECT" --branch="$BRANCH"
-          echo "The web app is at $URL" >> "$GITHUB_STEP_SUMMARY"
+          npx --yes "wrangler@$WRANGLER_VERSION" pages deploy "$SITE" --project-name="$PAGES_PROJECT" --branch="$BRANCH"
+          echo "The website is at $URL and the app at $URL/app/" >> "$GITHUB_STEP_SUMMARY"

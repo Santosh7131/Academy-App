@@ -10,11 +10,14 @@ import '../../core/format.dart' as f;
 import '../../core/levels.dart';
 import '../../core/session.dart';
 import '../../theme.dart';
+import '../../ui/desk.dart';
 import '../../ui/kit.dart';
 import '../../ui/update_card.dart';
 import 'classes_screen.dart' show addGroupOrCourse;
 import 'common.dart';
 import 'credit_screens.dart' show CreditLowNotice, CreditPill;
+import 'course_screens.dart' show coursePath;
+import 'group_screens.dart' show groupPath;
 import 'make_test.dart';
 import 'papers_screens.dart' show paperGroup, paperName;
 import 'tests_screens.dart' show TestRow;
@@ -135,6 +138,7 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
   @override
   Widget build(BuildContext context) {
     final d = _d;
+    if (onDesk(context)) return _desk(d);
     return SafeArea(
       bottom: false,
       child: PullToRefresh(
@@ -181,21 +185,12 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
     return groupName(t['class_level'] as int, '${t['subject']}');
   }
 
-  List<Widget> _body(Map<String, dynamic> d) {
-    final groups = _list(d, 'groups');
-    final courses = _list(d, 'courses');
-    final finished = _list(d, 'finished');
-    final papers = _list(d, 'papers');
-    final pending = _n(d['pending_requests']);
-    final code = '${d['tuition']?['join_code'] ?? ''}';
-    final noStudents = groups.every((g) => _n(g['students']) == 0) && courses.every((c) => _n(c['people']) == 0);
-    final fees = d['fees'] is Map ? (d['fees'] as Map).cast<String, dynamic>() : const <String, dynamic>{};
-    final hasClass = groups.isNotEmpty || courses.isNotEmpty;
-
-    // Every test that is open now or coming up, with the class it is for, from the groups and from the courses.
-    final open = <({Map<String, dynamic> t, String cls})>[];
-    final coming = <({Map<String, dynamic> t, String cls})>[];
-    for (final g in groups) {
+  /// Every test that is open now or coming up, with the class it is for, from the groups and from the courses. What closes first
+  /// comes first, and a test with no closing time goes last; what opens first comes first.
+  ({List<_ClassTest> open, List<_ClassTest> coming}) _testsOf(Map<String, dynamic> d) {
+    final open = <_ClassTest>[];
+    final coming = <_ClassTest>[];
+    for (final g in _list(d, 'groups')) {
       for (final t in (g['live'] as List).cast<Map<String, dynamic>>()) {
         open.add((t: t, cls: _classOf(t, group: g)));
       }
@@ -203,7 +198,7 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
         coming.add((t: t, cls: _classOf(t, group: g)));
       }
     }
-    for (final c in courses) {
+    for (final c in _list(d, 'courses')) {
       for (final t in (c['live'] as List).cast<Map<String, dynamic>>()) {
         open.add((t: t, cls: _classOf(t, course: c)));
       }
@@ -211,10 +206,61 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
         coming.add((t: t, cls: _classOf(t, course: c)));
       }
     }
-    // What closes first comes first; a test with no closing time goes last. What opens first comes first.
     DateTime far(DateTime? t) => t ?? DateTime(9999);
     open.sort((a, b) => far(f.parseTime(a.t['closes_at'])).compareTo(far(f.parseTime(b.t['closes_at']))));
     coming.sort((a, b) => far(f.parseTime(a.t['opens_at'])).compareTo(far(f.parseTime(b.t['opens_at']))));
+    return (open: open, coming: coming);
+  }
+
+  /// What needs the tutor, each with its icon and the page it opens: students waiting to be let in, papers to finish, fees (on the
+  /// owner's Home: payments students say they made, and this month's fees still to come), and inviting the first students.
+  List<({IconData icon, String title, String meta, String path})> _needs(Map<String, dynamic> d) {
+    final groups = _list(d, 'groups');
+    final courses = _list(d, 'courses');
+    final papers = _list(d, 'papers');
+    final pending = _n(d['pending_requests']);
+    final code = '${d['tuition']?['join_code'] ?? ''}';
+    final noStudents = groups.every((g) => _n(g['students']) == 0) && courses.every((c) => _n(c['people']) == 0);
+    final fees = d['fees'] is Map ? (d['fees'] as Map).cast<String, dynamic>() : const <String, dynamic>{};
+    final hasClass = groups.isNotEmpty || courses.isNotEmpty;
+    return [
+      if (pending > 0)
+        (icon: Ph.userPlus, title: pending == 1 ? '1 student wants to join' : '$pending students want to join', meta: 'Let them in, or decline', path: '/t/requests'),
+      if (papers.isNotEmpty)
+        (
+          icon: Ph.fileText,
+          title: papers.length == 1 ? '1 paper to finish' : '${papers.length} papers to finish',
+          meta: papers.length == 1 ? '${paperName(papers.first)} · ${paperGroup(papers.first)}' : '${paperName(papers.first)} and ${papers.length - 1} more',
+          path: papers.length == 1 ? '/t/papers/${papers.first['id']}' : '/t/papers',
+        ),
+      if (_n(fees['claims']) > 0)
+        (
+          icon: Ph.currencyInr,
+          title: _n(fees['claims']) == 1 ? '1 fee payment to confirm' : '${_n(fees['claims'])} fee payments to confirm',
+          meta: 'Students say they paid by UPI',
+          path: '/t/fees',
+        ),
+      if (_n(fees['unpaid']) > 0)
+        (
+          icon: Ph.currencyInr,
+          title: '${f.count(_n(fees['unpaid']), 'student')} to pay for ${DateFormat('MMMM').format(DateTime.now())}',
+          meta: [
+            '${inrWhole(_n(fees['left']))} still to come',
+            if (_n(fees['late']) > 0) '${_n(fees['late'])} late',
+          ].join(' · '),
+          path: '/t/fees',
+        ),
+      if (pending == 0 && noStudents && hasClass && code.length == 6)
+        (icon: Ph.shareNetwork, title: 'Invite your students', meta: 'Join code ${code.substring(0, 3)}-${code.substring(3)}', path: '/t/code'),
+    ];
+  }
+
+  List<Widget> _body(Map<String, dynamic> d) {
+    final groups = _list(d, 'groups');
+    final courses = _list(d, 'courses');
+    final finished = _list(d, 'finished');
+    final hasClass = groups.isNotEmpty || courses.isNotEmpty;
+    final (:open, :coming) = _testsOf(d);
 
     Widget pad(Widget w, {double top = 0}) => Padding(padding: EdgeInsets.fromLTRB(gutter, top, gutter, 0), child: w);
     Widget rows(List<Widget> list) => pad(Column(children: [
@@ -240,50 +286,7 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
     final staleShown = _all.contains('stale') ? stale : stale.take(2).toList();
 
     final needs = <Widget>[
-      if (pending > 0)
-        RowTile(
-          leading: _badge(Ph.userPlus),
-          title: pending == 1 ? '1 student wants to join' : '$pending students want to join',
-          meta: 'Let them in, or decline',
-          chevron: true,
-          onTap: () => _go('/t/requests'),
-        ),
-      if (papers.isNotEmpty)
-        RowTile(
-          leading: _badge(Ph.fileText),
-          title: papers.length == 1 ? '1 paper to finish' : '${papers.length} papers to finish',
-          meta: papers.length == 1 ? '${paperName(papers.first)} · ${paperGroup(papers.first)}' : '${paperName(papers.first)} and ${papers.length - 1} more',
-          chevron: true,
-          onTap: () => _go(papers.length == 1 ? '/t/papers/${papers.first['id']}' : '/t/papers'),
-        ),
-      // Fees, on the owner's Home: payments students say they made, and this month's fees still to come.
-      if (_n(fees['claims']) > 0)
-        RowTile(
-          leading: _badge(Ph.currencyInr),
-          title: _n(fees['claims']) == 1 ? '1 fee payment to confirm' : '${_n(fees['claims'])} fee payments to confirm',
-          meta: 'Students say they paid by UPI',
-          chevron: true,
-          onTap: () => _go('/t/fees'),
-        ),
-      if (_n(fees['unpaid']) > 0)
-        RowTile(
-          leading: _badge(Ph.currencyInr),
-          title: '${f.count(_n(fees['unpaid']), 'student')} to pay for ${DateFormat('MMMM').format(DateTime.now())}',
-          meta: [
-            '${inrWhole(_n(fees['left']))} still to come',
-            if (_n(fees['late']) > 0) '${_n(fees['late'])} late',
-          ].join(' · '),
-          chevron: true,
-          onTap: () => _go('/t/fees'),
-        ),
-      if (pending == 0 && noStudents && hasClass && code.length == 6)
-        RowTile(
-          leading: _badge(Ph.shareNetwork),
-          title: 'Invite your students',
-          meta: 'Join code ${code.substring(0, 3)}-${code.substring(3)}',
-          chevron: true,
-          onTap: () => _go('/t/code'),
-        ),
+      for (final n in _needs(d)) RowTile(leading: _badge(n.icon), title: n.title, meta: n.meta, chevron: true, onTap: () => _go(n.path)),
     ];
 
     final c = Credit.from(d['credit']);
@@ -356,6 +359,227 @@ class _TutorHomeState extends State<TutorHome> with WidgetsBindingObserver, Auto
         decoration: BoxDecoration(color: warningSoft, borderRadius: BorderRadius.circular(rSmall)),
         child: Icon(icon, size: 20, color: warning),
       );
+
+  // ---------------------------------------------------------------- beside a computer's sidebar
+
+  /// Home in a computer's browser: the tests on the left, what needs the tutor and the classes on the right. Make tests is in the
+  /// sidebar, so it is not here as well.
+  Widget _desk(Map<String, dynamic>? d) {
+    final c = Credit.from(d?['credit']);
+    return DeskScroll(children: [
+      DeskHead(
+        kicker: '${session.tuitionName} · ${DateFormat('EEEE d MMMM').format(DateTime.now())}',
+        title: 'Home',
+        actions: [
+          if (c != null) CreditPill(c, onTap: () => _go('/t/credit')),
+          DeskButton('Invite students', icon: Ph.linkSimple, onTap: () => _go('/t/code')),
+        ],
+      ),
+      const UpdateBanner(),
+      if (d == null && _error != null)
+        ErrorState(message: _error!, onRetry: _load)
+      else if (d == null)
+        const LoadingState(rows: 3)
+      else
+        ..._deskBody(d),
+    ]);
+  }
+
+  List<Widget> _deskBody(Map<String, dynamic> d) {
+    final groups = _list(d, 'groups');
+    final courses = _list(d, 'courses');
+    final finished = _list(d, 'finished');
+    final (:open, :coming) = _testsOf(d);
+    final balance = Credit.from(d['credit']);
+    final notices = [
+      if (_error != null) InlineNotice(_error!, icon: Ph.warning),
+      if (balance != null && balance.out) CreditLowNotice(balance, onAdd: () => _go('/t/plan')),
+      if (_notice != null) InlineNotice(_notice!, tone: Tone.success, icon: Ph.checkCircle),
+    ];
+    final top = [for (final n in notices) Padding(padding: const EdgeInsets.only(bottom: 14), child: n)];
+    if (groups.isEmpty && courses.isEmpty) {
+      return [
+        ...top,
+        EmptyState(
+          icon: Ph.users,
+          title: 'No groups or courses yet',
+          body: 'Add a group, like 10th Maths, or a course. Then you can add your people and make your first test.',
+          action: SizedBox(width: 320, child: PrimaryButton('Add a group or course', leadingIcon: Ph.plus, onTap: _addGroupOrCourse)),
+        ),
+      ];
+    }
+
+    final stale = _list(d, 'stale');
+    final staleShown = _all.contains('stale') ? stale : stale.take(2).toList();
+    final tests = <Widget>[
+      for (final t in staleShown) Padding(
+        padding: const EdgeInsets.only(bottom: gapRow),
+        child: _StaleCard(t: t, cls: _classOf(t), busy: _acting == '${t['id']}', onRemind: () => _remind(t), onClose: () => _close(t)),
+      ),
+      if (stale.length > 2)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextAction(
+            _all.contains('stale') ? 'Show fewer' : 'Show all ${stale.length} tests open for a week',
+            onTap: () => setState(() => _all.contains('stale') ? _all.remove('stale') : _all.add('stale')),
+          ),
+        ),
+      DeskRule('Open now', count: open.length, first: staleShown.isEmpty),
+      if (open.isEmpty) Fig('No test is open right now.', style: bodyStyle.copyWith(color: muted)),
+      for (final (i, o) in open.indexed) ...[
+        if (i > 0) const SizedBox(height: 12),
+        _DeskOpenTest(t: o.t, cls: o.cls, onTap: () => _go('/t/tests/${o.t['id']}')),
+      ],
+      if (coming.isNotEmpty) ...[
+        DeskRule('Coming up', count: coming.length),
+        DeskTable(
+          columns: const [DeskColumn('Test', flex: 5), DeskColumn('Class', flex: 4), DeskColumn('Opens', width: 214), DeskColumn('Students', width: 76), DeskColumn('', width: 16)],
+          rows: [
+            for (final o in coming)
+              DeskRow([
+                deskCellTitle('${o.t['title']}'),
+                deskCell(o.cls),
+                deskCell(switch (f.parseTime(o.t['opens_at'])) { final at? => f.whenDate(at), null => 'Later' }),
+                deskCell('${_n(o.t['assigned'])}'),
+                deskChevron(),
+              ], onTap: () => _go('/t/tests/${o.t['id']}')),
+          ],
+        ),
+      ],
+      if (finished.isNotEmpty) ...[
+        DeskRule('Finished lately', count: finished.length),
+        DeskTable(
+          columns: const [DeskColumn('Test', flex: 5), DeskColumn('Class', flex: 4), DeskColumn('Closed', width: 214), DeskColumn('Handed in', width: 76), DeskColumn('', width: 16)],
+          rows: [
+            for (final t in finished)
+              DeskRow([
+                deskCellTitle('${t['title']}'),
+                deskCell(_classOf(t)),
+                deskCell(switch (f.parseTime(t['closes_at'])) {
+                  final at? when at.isBefore(DateTime.now()) => f.dayDate(at),
+                  _ => 'All handed in',
+                }),
+                deskCell('${_n(t['submitted'])}/${_n(t['assigned'])}'),
+                deskChevron(),
+              ], onTap: () => _go('/t/tests/${t['id']}')),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 14, 4, 0),
+          child: Fig("Older tests are on each group's or course's page, under Groups & courses.", style: labelStyle),
+        ),
+      ],
+      if (open.isEmpty && coming.isEmpty && finished.isEmpty)
+        const EmptyState(
+          icon: Ph.exam,
+          title: 'No tests yet',
+          body: 'Click Make tests. Add question papers and AI reads the questions, or describe a test and AI writes it.',
+        ),
+    ];
+
+    final needs = _needs(d);
+    final needsList = DeskList([for (final n in needs) DeskItem(icon: n.icon, title: n.title, meta: n.meta, onTap: () => _go(n.path))]);
+    final classes = [
+      for (final g in groups)
+        DeskItem(
+          title: groupName(g['class_level'] as int, '${g['subject']}'),
+          meta: f.count(_n(g['students']), 'student'),
+          note: (g['live'] as List).isEmpty ? null : '${(g['live'] as List).length} open',
+          onTap: () => _go(groupPath(g)),
+        ),
+      for (final c in courses)
+        DeskItem(
+          title: '${c['name']}',
+          meta: '${f.count(_n(c['people']), 'person', 'people')} · course',
+          note: (c['live'] as List).isEmpty ? null : '${(c['live'] as List).length} open',
+          onTap: () => _go(coursePath(c)),
+        ),
+    ];
+    Widget classRule({required bool first}) =>
+        DeskRule('Groups & courses', count: classes.length, first: first, trailing: TextAction('See all', onTap: () => context.go('/t/classes')));
+    final classList = DeskList(classes.take(8).toList());
+
+    return [
+      ...top,
+      LayoutBuilder(builder: (context, box) {
+        // Side by side when there is room for both; on a smaller screen what needs the tutor comes first, the classes last.
+        if (box.maxWidth >= 1000) {
+          return Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: tests)),
+            const SizedBox(width: 30),
+            SizedBox(
+              width: 330,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                if (needs.isNotEmpty) ...[DeskRule('Needs you', count: needs.length, first: true), needsList],
+                classRule(first: needs.isEmpty),
+                classList,
+              ]),
+            ),
+          ]);
+        }
+        return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (needs.isNotEmpty) ...[DeskRule('Needs you', count: needs.length, first: true), needsList, const SizedBox(height: 26)],
+          ...tests,
+          classRule(first: false),
+          classList,
+        ]);
+      }),
+    ];
+  }
+}
+
+/// A test and the name of the class it is for.
+typedef _ClassTest = ({Map<String, dynamic> t, String cls});
+
+/// A test students can write now, on Home in a computer's browser: its name, its class and when it closes, how many have handed it
+/// in (or are writing it this minute), and a bar of the share handed in.
+class _DeskOpenTest extends StatelessWidget {
+  const _DeskOpenTest({required this.t, required this.cls, required this.onTap});
+  final Map<String, dynamic> t;
+  final String cls;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final closes = f.parseTime(t['closes_at']);
+    final submitted = _n(t['submitted']);
+    final assigned = _n(t['assigned']);
+    final writing = _n(t['writing']);
+    return Pressable(
+      onTap: onTap,
+      radius: rCard,
+      child: Builder(builder: (context) {
+        final hover = pressHover(context);
+        return Container(
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+          decoration: surface(radius: rCard, shadow: hover ? e4 : e2, color: hover && isDark ? cardHi : null),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Fig('${t['title']}', style: sectionStyle, maxLines: 2),
+                  const SizedBox(height: 3),
+                  Fig('$cls · ${closes == null ? 'open' : 'closes ${f.whenDate(closes)}'}', style: bodyStyle.copyWith(fontSize: 13, color: muted), maxLines: 2),
+                ]),
+              ),
+              const SizedBox(width: 24),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                Text('$submitted/$assigned', style: numStyle(size: 24)),
+                const SizedBox(height: 5),
+                Text(writing > 0 ? '$writing writing now' : 'handed in', style: labelStyle.copyWith(color: writing > 0 ? warning : muted)),
+              ]),
+            ]),
+            const SizedBox(height: 14),
+            Row(children: [
+              const TagChip('Open now', tone: Tone.success),
+              const SizedBox(width: 14),
+              Expanded(child: Track(assigned == 0 ? 0 : submitted / assigned)),
+            ]),
+          ]),
+        );
+      }),
+    );
+  }
 }
 
 // ---------------------------------------------------------------- test rows

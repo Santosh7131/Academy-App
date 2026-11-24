@@ -74,7 +74,7 @@ phones and app versions in use, and how the server is doing.
 | `admin/` | Flutter, Android. The developer's console. |
 | `api/` | TypeScript and Hono on Neon Functions, with Postgres and object storage on Neon. |
 | AI | Google Gemini reads the pages; Groq's gpt-oss models, with a Gemini checker, work out the answers. |
-| `website/` | Static pages for GitHub Pages, with no scripts. |
+| `website/` | The public website, static, with no scripts. It goes online with the web app: the website at the address, the app under `/app/`. |
 | `tools/` | Migrations, sample data, the check suites and the release scripts. |
 
 ## Run it on your PC
@@ -1185,8 +1185,10 @@ opens it:
   `index.html`, `flutter_bootstrap.js`, `main.dart.js`, `version.json` or `assets/` without asking
   again (`Cache-Control: no-cache`); `canvaskit/` can be kept.
 
-**On Cloudflare Pages.** `.github/workflows/web-app.yml` builds it on GitHub and puts it on Cloudflare Pages, project
-`anytutor` (its first run makes the project). Every push to main that touches the app puts a build for the dev server at https://dev.anytutor.pages.dev;
+**On Cloudflare Pages.** `.github/workflows/web-app.yml` builds it on GitHub (with `-BaseHref /app/`) and puts it on
+Cloudflare Pages with the website: `website/` at the address itself and the app under `/app/`, one origin for both, so
+the CORS rules above name the address alone. Project `anytutor` (its first run makes the project). Every push to main
+that touches the app or the website puts a build for the dev server at https://dev.anytutor.pages.dev (the app at `/app/`);
 Actions → Web app → Run workflow → `live` puts a build for the live server at https://anytutor.pages.dev, once
 `LIVE_API_BASE` in the workflow names the live function. It needs two repository secrets: `CLOUDFLARE_API_TOKEN`, a
 token that can only edit Pages, and `CLOUDFLARE_ACCOUNT_ID`.
@@ -1217,8 +1219,12 @@ Where it differs from the Android app:
   browser offers its share sheet. Shelf files open in a new tab.
 - **UPI.** A computer has no UPI app, so a student there pays by scanning the code with a phone; an
   Android phone's browser hands the payment to a UPI app as the app does.
-- **Wide screens.** On a computer (and on a tablet, in the Android app too) the app keeps to a
-  720-wide column in the middle instead of stretching across the screen.
+- **Wide screens.** In a browser window at least 1024 wide, a signed-in person gets the computer layout
+  (`app/lib/ui/desk.dart`, `app/lib/features/desk_frame.dart`): a sidebar that stays, the tutor's Home and a
+  group's or course's page laid out for the width with tables, every other page in a 760-wide column, no
+  page transitions, and a computer's controls (the hand over what can be clicked, hover, Tab and Enter,
+  selecting text). Signing in keeps a narrow column of its own and a test being written keeps the phone's.
+  A narrower window, and a tablet in the Android app, keep the 720-wide column in the middle.
 - **A reload stays on the page.** The app starts again and returns to where it was.
 - **Other sites.** The page loads letters for Hindi, Tamil and other scripts from Google's font
   server, Google's sign-in library (the sign-in package loads it although it is not used in a

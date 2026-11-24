@@ -28,14 +28,16 @@ import 'shell.dart';
 import 'students_screens.dart';
 import 'tests_screens.dart';
 import 'timetable_screens.dart';
+import '../../ui/desk.dart';
 
-/// A tab's own screen. Switching tabs swaps instantly, as a tab bar should.
-GoRoute _tab(String path, Widget Function(GoRouterState s) build) =>
-    GoRoute(path: path, pageBuilder: (c, s) => NoTransitionPage(key: s.pageKey, child: build(s)));
+/// A tab's own screen. Switching tabs swaps instantly, as a tab bar should. Beside a computer's sidebar a screen keeps to a column
+/// in the middle, unless it is [wide]: laid out for the whole room (ui/desk.dart).
+GoRoute _tab(String path, Widget Function(GoRouterState s) build, {bool wide = false}) =>
+    GoRoute(path: path, pageBuilder: (c, s) => NoTransitionPage(key: s.pageKey, child: DeskPage(wide: wide, child: build(s))));
 
 /// Forms and details fade in over the tab: the theme's fade-forwards transition.
-GoRoute _page(String path, Widget Function(GoRouterState s) build) =>
-    GoRoute(path: path, pageBuilder: (c, s) => MaterialPage(key: s.pageKey, child: build(s)));
+GoRoute _page(String path, Widget Function(GoRouterState s) build, {bool wide = false}) =>
+    GoRoute(path: path, pageBuilder: (c, s) => MaterialPage(key: s.pageKey, child: DeskPage(wide: wide, child: build(s))));
 
 int? _int(GoRouterState s, String key) => int.tryParse(s.uri.queryParameters[key] ?? '');
 
@@ -53,7 +55,7 @@ final teacherRoutes = <RouteBase>[
   StatefulShellRoute.indexedStack(
     builder: (context, state, shell) => TeacherShell(shell: shell),
     branches: [
-      StatefulShellBranch(routes: [_tab('/t', (_) => const TutorHome())]),
+      StatefulShellBranch(routes: [_tab('/t', (_) => const TutorHome(), wide: true)]),
       StatefulShellBranch(routes: [_tab('/t/classes', (_) => const ClassesScreen())]),
       StatefulShellBranch(routes: [_tab('/t/bank', (_) => const BankScreen())]),
     ],
@@ -66,7 +68,7 @@ final teacherRoutes = <RouteBase>[
     final m = s.extra as MakeTests?;
     return MakeTestsScreen(target: m?.target, targets: m?.targets ?? const []);
   }),
-  _page('/t/courses/:id', (s) => CourseScreen(id: s.pathParameters['id']!, name: s.uri.queryParameters['name'] ?? 'Course')),
+  _page('/t/courses/:id', (s) => CourseScreen(id: s.pathParameters['id']!, name: s.uri.queryParameters['name'] ?? 'Course'), wide: true),
   _page(
     '/t/courses/:id/add',
     (s) => AddPeopleScreen(courseId: s.pathParameters['id']!, courseName: s.uri.queryParameters['name'] ?? 'Course'),
@@ -82,6 +84,7 @@ final teacherRoutes = <RouteBase>[
       subjectId: s.pathParameters['subject']!,
       subjectName: s.uri.queryParameters['name'] ?? 'Group',
     ),
+    wide: true,
   ),
   _page(
     '/t/groups/:cls/:subject/chat',

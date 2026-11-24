@@ -19,7 +19,8 @@
     <nav aria-label="Pages">
       <a href="./#how">How it works</a>
       <a href="./#pricing">Pricing</a>
-      <a class="dl" href="./#download">Download</a>
+      <a class="in" href="app/#/login">Log in</a>
+      <a class="dl" href="app/#/signup">Start free</a>
     </nav>
   </div>
 </header>
@@ -29,7 +30,7 @@
   <p class="draft">Draft: this page needs a legal check before anyone signs up. The parts marked in orange are still to be filled in.</p>
   <p class="small">Last updated: <span class="fill">FILL-IN date</span></p>
 
-  <p>AnyTutor is an Android app for tuition teachers and their students. This page says what the app keeps, who else handles it, and how to have it deleted. The app is run by <span class="fill">FILL-IN the business's legal name and address</span>.</p>
+  <p>AnyTutor is an app for tuition teachers and their students, in a browser and on Android. This page says what the app keeps, who else handles it, and how to have it deleted. The app is run by <span class="fill">FILL-IN the business's legal name and address</span>.</p>
 
   <h2>What the app keeps</h2>
   <ul>
@@ -54,8 +55,8 @@
     <li><strong>Neon</strong> runs the app's database, its server and its file storage, in <span class="fill">FILL-IN the region</span>.</li>
     <li><strong>Google (the Gemini API) and Groq</strong> receive the pages of question papers and the questions, so that AI can read the papers, work out the answers and write questions. <span class="fill">FILL-IN: say whether Google's unpaid Gemini tier is used. On that tier Google may use what is sent to it to improve its products, and people may read it; on a paid tier it does not.</span></li>
     <li><strong>Google Sign-In</strong>, for those who choose to sign in with Google: Google confirms the account to the app, and so knows that its user signed in to AnyTutor.</li>
-    <li><strong>GitHub</strong> hosts this website, the app's downloads and the file the app checks for updates. GitHub sees the IP address of anyone who visits or downloads.</li>
-    <li><strong>The web app</strong>, the same app in a browser, is served by <span class="fill">FILL-IN the web app's host</span>, and loads some of its parts from other sites: letters for Hindi, Tamil and other scripts from Google's font server, Google's sign-in library (which the app loads although sign-in with Google is not offered in the browser yet), and the PDF reader for question papers from jsDelivr. Each of them sees the IP address of the browser, as with any website.</li>
+    <li><strong>GitHub</strong> hosts the Android app's downloads and the file it checks for updates. GitHub sees the IP address of anyone who downloads.</li>
+    <li><strong>The web app</strong>, the same app in a browser, is served by Cloudflare (Cloudflare Pages), with this website, and loads some of its parts from other sites: letters for Hindi, Tamil and other scripts from Google's font server, Google's sign-in library (which the app loads although sign-in with Google is not offered in the browser yet), and the PDF reader for question papers from jsDelivr. Each of them sees the IP address of the browser, as with any website.</li>
     <li><strong>Payments</strong> are made from people's own UPI apps: a tutor's for a plan, and a student's or parent's for fees, straight to the tutor. The app never sees bank or card details and never holds the money.</li>
     <li><strong>Online classes</strong> run on the service a tutor chooses, such as Google Meet, Zoom or Jitsi, not in AnyTutor. Tapping Join opens the tutor's link in that service's app or in the browser. The app sends that service nothing about the student, though the browser may tell it that the link was opened from AnyTutor. The class itself is covered by that service's own privacy policy.</li>
   </ul>

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../theme.dart';
+import 'desk.dart' show actionHover, deskAllowed, onDesk;
 import 'icons.dart';
 import 'motion.dart';
 import 'tokens.dart';
@@ -70,13 +71,22 @@ class Kicker extends StatelessWidget {
 }
 
 /// Replaces the ink splash: the child scales to 0.978 while pressed (guide: 130 ms, easeOutCubic).
+///
+/// In a browser it also answers a computer's pointer and keyboard: the hand cursor over it, [PressState] for its own widgets to
+/// answer the hover, and a place in the Tab order, with Enter or Space pressing it and a ring round it while the keyboard is on it.
 class Pressable extends StatefulWidget {
-  const Pressable({super.key, required this.child, this.onTap, this.label, this.enabled = true});
+  const Pressable({super.key, required this.child, this.onTap, this.label, this.enabled = true, this.radius = rSmall, this.ringInside = false});
 
   final Widget child;
   final VoidCallback? onTap;
   final String? label;
   final bool enabled;
+
+  /// The corners of the child, for the keyboard's ring round it.
+  final double radius;
+
+  /// The keyboard's ring goes inside the child instead of round it: for a table's row, whose card would cut a ring outside off.
+  final bool ringInside;
 
   @override
   State<Pressable> createState() => _PressableState();
@@ -84,6 +94,8 @@ class Pressable extends StatefulWidget {
 
 class _PressableState extends State<Pressable> {
   bool _down = false;
+  bool _hover = false;
+  bool _focus = false;
 
   void _set(bool v) {
     if (_down != v) setState(() => _down = v);
@@ -92,6 +104,20 @@ class _PressableState extends State<Pressable> {
   @override
   Widget build(BuildContext context) {
     final active = widget.enabled && widget.onTap != null;
+    Widget child = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapDown: active ? (_) => _set(true) : null,
+      onTapUp: active ? (_) => _set(false) : null,
+      onTapCancel: active ? () => _set(false) : null,
+      onTap: active ? widget.onTap : null,
+      child: AnimatedScale(
+        scale: _down ? 0.978 : 1,
+        duration: const Duration(milliseconds: 130),
+        curve: Curves.easeOutCubic,
+        child: widget.child,
+      ),
+    );
+    if (deskAllowed) child = _pointer(child, active);
     // Its own accessibility node, so a button inside a header is reachable on its own;
     // with a label, the label replaces the child's text instead of repeating it.
     return Semantics(
@@ -100,22 +126,64 @@ class _PressableState extends State<Pressable> {
       enabled: active,
       label: widget.label,
       excludeSemantics: widget.label != null,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTapDown: active ? (_) => _set(true) : null,
-        onTapUp: active ? (_) => _set(false) : null,
-        onTapCancel: active ? () => _set(false) : null,
-        onTap: active ? widget.onTap : null,
-        child: AnimatedScale(
-          scale: _down ? 0.978 : 1,
-          duration: const Duration(milliseconds: 130),
-          curve: Curves.easeOutCubic,
-          child: widget.child,
-        ),
+      child: child,
+    );
+  }
+
+  /// The pointer's and the keyboard's part, in a browser. The child keeps its place in the tree whatever the hover and focus are, so
+  /// nothing inside it is built anew when the pointer comes and goes.
+  Widget _pointer(Widget child, bool active) {
+    Object? press(Intent _) {
+      widget.onTap?.call();
+      return null;
+    }
+
+    final ring = BoxDecoration(
+      borderRadius: BorderRadius.circular(widget.ringInside ? widget.radius : widget.radius + 4),
+      border: Border.all(color: ink, width: 2),
+    );
+    return FocusableActionDetector(
+      enabled: active,
+      includeFocusSemantics: false,
+      mouseCursor: active ? SystemMouseCursors.click : MouseCursor.defer,
+      onShowHoverHighlight: (v) {
+        if (_hover != v) setState(() => _hover = v);
+      },
+      onShowFocusHighlight: (v) {
+        if (_focus != v) setState(() => _focus = v);
+      },
+      actions: <Type, Action<Intent>>{
+        ActivateIntent: CallbackAction<ActivateIntent>(onInvoke: press),
+        ButtonActivateIntent: CallbackAction<ButtonActivateIntent>(onInvoke: press),
+      },
+      child: PressState(
+        hover: active && _hover,
+        focus: active && _focus,
+        child: Stack(clipBehavior: Clip.none, fit: StackFit.passthrough, children: [
+          child,
+          if (active && _focus)
+            widget.ringInside
+                ? Positioned.fill(child: IgnorePointer(child: DecoratedBox(decoration: ring)))
+                : Positioned(left: -4, top: -4, right: -4, bottom: -4, child: IgnorePointer(child: DecoratedBox(decoration: ring))),
+        ]),
       ),
     );
   }
 }
+
+/// In a browser: whether the pointer is over the nearest [Pressable] above, and whether the keyboard is on it. A phone has neither.
+class PressState extends InheritedWidget {
+  const PressState({super.key, required this.hover, required this.focus, required super.child});
+
+  final bool hover;
+  final bool focus;
+
+  @override
+  bool updateShouldNotify(PressState oldWidget) => hover != oldWidget.hover || focus != oldWidget.focus;
+}
+
+/// The pointer is over the [Pressable] this sits in (a browser only). Read it under the Pressable, in a [Builder].
+bool pressHover(BuildContext context) => context.dependOnInheritedWidgetOfExactType<PressState>()?.hover ?? false;
 
 /// The floating surface: the atom almost everything is built from.
 class Surface extends StatelessWidget {
@@ -150,17 +218,21 @@ class CircleBtn extends StatelessWidget {
   Widget build(BuildContext context) => Pressable(
         onTap: onTap,
         label: label,
-        child: Container(
-          width: size,
-          height: size,
-          alignment: Alignment.center,
-          decoration: filled
-              ? BoxDecoration(color: actionFill, shape: BoxShape.circle, boxShadow: e2)
-              : ground != null
-                  ? BoxDecoration(color: ground, shape: BoxShape.circle)
-                  : surface(radius: rPill, shadow: e1),
-          child: Icon(icon, size: size * 0.47, color: filled ? actionInk : (tint ?? ink)),
-        ),
+        radius: size / 2,
+        child: Builder(builder: (context) {
+          final hover = pressHover(context);
+          return Container(
+            width: size,
+            height: size,
+            alignment: Alignment.center,
+            decoration: filled
+                ? BoxDecoration(color: hover ? actionHover : actionFill, shape: BoxShape.circle, boxShadow: e2)
+                : ground != null
+                    ? BoxDecoration(color: hover ? Color.lerp(ground, ink, 0.07) : ground, shape: BoxShape.circle)
+                    : surface(radius: rPill, shadow: hover ? e2 : e1, color: hover && isDark ? cardHi : null),
+            child: Icon(icon, size: size * 0.47, color: filled ? actionInk : (tint ?? ink)),
+          );
+        }),
       );
 }
 
@@ -188,23 +260,25 @@ class PrimaryButton extends StatelessWidget {
       onTap: onTap,
       label: label,
       enabled: enabled,
-      child: AnimatedContainer( // motion: approved
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        decoration: BoxDecoration(
-          color: enabled || busy ? actionFill : fill,
-          borderRadius: BorderRadius.circular(rSmall),
-          boxShadow: enabled ? e4 : const [],
+      child: Builder(
+        builder: (context) => AnimatedContainer( // motion: approved
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          decoration: BoxDecoration(
+            color: enabled || busy ? (enabled && pressHover(context) ? actionHover : actionFill) : fill,
+            borderRadius: BorderRadius.circular(rSmall),
+            boxShadow: enabled ? e4 : const [],
+          ),
+          alignment: Alignment.center,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (leadingIcon != null && !busy) ...[Icon(leadingIcon, size: 19, color: fg), const SizedBox(width: 9)],
+            Flexible(child: Fig(label, style: buttonStyle.copyWith(color: fg), maxLines: 1)),
+            if (busy) ...[const SizedBox(width: 10), LoadingDots(color: fg, size: 4.5)]
+            else if (icon != null) ...[const SizedBox(width: 8), Icon(icon, size: 18, color: fg)],
+          ]),
         ),
-        alignment: Alignment.center,
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (leadingIcon != null && !busy) ...[Icon(leadingIcon, size: 19, color: fg), const SizedBox(width: 9)],
-          Flexible(child: Fig(label, style: buttonStyle.copyWith(color: fg), maxLines: 1)),
-          if (busy) ...[const SizedBox(width: 10), LoadingDots(color: fg, size: 4.5)]
-          else if (icon != null) ...[const SizedBox(width: 8), Icon(icon, size: 18, color: fg)],
-        ]),
       ),
     );
     if (enabled || disabledReason == null) return button;
@@ -230,16 +304,19 @@ class SecondaryButton extends StatelessWidget {
     return Pressable(
       onTap: onTap,
       label: label,
-      child: Container(
-        height: 52,
-        padding: const EdgeInsets.symmetric(horizontal: 18),
-        decoration: surface(radius: rSmall, shadow: e1),
-        alignment: Alignment.center,
-        child: Row(mainAxisSize: MainAxisSize.min, children: [
-          if (icon != null) ...[Icon(icon, size: 18, color: fg), const SizedBox(width: 8)],
-          Flexible(child: Fig(label, style: buttonStyle.copyWith(color: fg), maxLines: 1)),
-        ]),
-      ),
+      child: Builder(builder: (context) {
+        final hover = pressHover(context);
+        return Container(
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 18),
+          decoration: surface(radius: rSmall, shadow: hover ? e2 : e1, color: hover && isDark ? cardHi : null),
+          alignment: Alignment.center,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            if (icon != null) ...[Icon(icon, size: 18, color: fg), const SizedBox(width: 8)],
+            Flexible(child: Fig(label, style: buttonStyle.copyWith(color: fg), maxLines: 1)),
+          ]),
+        );
+      }),
     );
   }
 }
@@ -480,24 +557,29 @@ class RowTile extends StatelessWidget {
   Widget build(BuildContext context) => Pressable(
         // No label: a screen reader reads the row's own title, details and figures.
         onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(17, 15, 15, 15),
-          decoration: surface(radius: rCard, shadow: e1),
-          child: Row(children: [
-            if (leading != null) ...[leading!, const SizedBox(width: 14)],
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                titleWidget ?? Fig(title ?? '', style: rowTitleStyle, maxLines: 2),
-                if (metaWidget != null || meta != null) ...[
-                  const SizedBox(height: 2),
-                  metaWidget ?? Fig(meta!, style: labelStyle.copyWith(color: metaColor ?? muted), maxLines: 2),
-                ],
-              ]),
-            ),
-            if (trailing != null) ...[const SizedBox(width: 10), trailing!],
-            if (chevron) ...[const SizedBox(width: 6), Icon(Ph.caretRight, size: 16, color: faint)],
-          ]),
-        ),
+        radius: rCard,
+        child: Builder(builder: (context) {
+          // Under a computer's pointer the row lifts a little, and its arrow darkens.
+          final hover = pressHover(context);
+          return Container(
+            padding: const EdgeInsets.fromLTRB(17, 15, 15, 15),
+            decoration: surface(radius: rCard, shadow: hover ? e3 : e1, color: hover && isDark ? cardHi : null),
+            child: Row(children: [
+              if (leading != null) ...[leading!, const SizedBox(width: 14)],
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  titleWidget ?? Fig(title ?? '', style: rowTitleStyle, maxLines: 2),
+                  if (metaWidget != null || meta != null) ...[
+                    const SizedBox(height: 2),
+                    metaWidget ?? Fig(meta!, style: labelStyle.copyWith(color: metaColor ?? muted), maxLines: 2),
+                  ],
+                ]),
+              ),
+              if (trailing != null) ...[const SizedBox(width: 10), trailing!],
+              if (chevron) ...[const SizedBox(width: 6), Icon(Ph.caretRight, size: 16, color: hover ? ink : faint)],
+            ]),
+          );
+        }),
       );
 }
 
@@ -941,7 +1023,11 @@ class PushedPanel extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(gutter, 8, gutter, 0),
               child: Row(children: [
-                CircleBtn(icon: Ph.arrowLeft, label: 'Back', onTap: onBack ?? () => Navigator.of(context).maybePop()),
+                // Beside a computer's sidebar, a page opened from the sidebar has nothing behind it: the sidebar is the way on.
+                if (onBack != null || !onDesk(context) || Navigator.of(context).canPop())
+                  CircleBtn(icon: Ph.arrowLeft, label: 'Back', onTap: onBack ?? () => Navigator.of(context).maybePop())
+                else
+                  const SizedBox(height: 40),
                 const Spacer(),
                 ?headerTrailing,
               ]),

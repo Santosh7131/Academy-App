@@ -1,8 +1,20 @@
-// Proves every ready-made question before it can reach the app: four distinct options, the
-// marked option equal to the independently computed `expect` and no other option equal to it,
-// any `verify` check true, balanced LaTeX, and the same right answer after options are arranged.
-// Usage: node tools/check-library.ts
+// Checks every ready-made question before it can reach the app: four distinct options, the marked
+// option equal to `expect` and no other option equal to it, any `verify` check true, balanced
+// LaTeX, and the same right answer after options are arranged.
+//
+// What that proves depends on the answer. A number is worked out by code and compared with every
+// option, so the marked option is proved right and the others wrong (where they read as numbers).
+// A text answer (a fact or a statement) is simply the option written first: the check is that the
+// options are sound, and the answer rests on the writer's review. A `verify` check proves the
+// marked answer works, not that the other options are wrong. The summary counts each kind.
+//
+// It also lists likely repeats, to read rather than fail on: the same question again once numbers
+// and names are set aside, two questions in a chapter that read nearly the same, two fact questions
+// in a chapter with the same answer, and the same four text options twice.
+//
+// Usage: node tools/check-library.ts [--list]   (--list prints every likely repeat)
 import { arrange, books } from '../api/src/ready-made/index.ts';
+import type { LibraryQuestion } from '../api/src/ready-made/types.ts';
 
 function value(opt: string): number | null {
   const s = opt
@@ -48,6 +60,7 @@ function latexOk(s: string): boolean {
 let failures = 0;
 let total = 0;
 const spread = [0, 0, 0, 0];
+const known = { computed: 0, computedAllRead: 0, textWithCheck: 0, textOnly: 0 };
 for (const book of books) {
   const seen = new Set<string>();
   let bookCount = 0;
@@ -79,11 +92,16 @@ for (const book of books) {
         vals.forEach((x, k) => {
           if (k !== qq.correct && x !== null && same(x, expect)) fail(`option ${'ABCD'[k]} also equals the answer`);
         });
+        known.computed++;
+        // An option that cannot be read as a number is never compared with the answer, so it is not proved wrong.
+        if (vals.every((x, k) => k === qq.correct || x !== null)) known.computedAllRead++;
       } else {
         if (qq.options[qq.correct] !== qq.expect) fail(`marked "${qq.options[qq.correct]}", but the answer is "${qq.expect}"`);
         qq.options.forEach((o, k) => {
           if (k !== qq.correct && o === qq.expect) fail(`option ${'ABCD'[k]} also equals the answer`);
         });
+        if (qq.verify) known.textWithCheck++;
+        else known.textOnly++;
       }
       if (qq.verify && !qq.verify()) fail('its verify check is false');
       const stored = arrange(qq);
@@ -93,6 +111,104 @@ for (const book of books) {
   }
   console.log(`Class ${book.classLevel} ${book.subject}: ${book.chapters.length} chapters, ${bookCount} questions`);
 }
-console.log(`${total} questions checked, ${failures} failure${failures === 1 ? '' : 's'}`);
+
+// Likely repeats.
+
+/** Names that word problems use; they are hidden like numbers, so a new name does not make a new question. */
+const NAMES = new Set(
+  ('asha ravi meena arjun priya kabir zoya rohan anil sunita farhan divya imran lakshmi neha vikram tara sameer gita karan riya ' +
+    'aman ishaan nandini tenzin mary joseph harpreet suresh kavya krithika anjali deepak fatima gopal hari jaya manoj nisha pooja ' +
+    'rahul salma usha varun yusuf')
+    .split(' '),
+);
+
+/** Text as tokens, with every number and name hidden. */
+function tokens(text: string): string[] {
+  const t = text
+    .replace(/(?<=[a-z0-9,;:]\s)[A-Z][a-zāīūṛṇṣ]+/g, ' N ') // a name or a place in mid-sentence
+    .replace(/[A-Za-zāīūṛṇṣ]+/g, (w) => (NAMES.has(w.toLowerCase()) ? ' N ' : w))
+    .toLowerCase()
+    .replace(/\\text\{([^}]*)\}/g, ' $1 ')
+    .replace(/\\(left|right|displaystyle|quad|qquad)\b|\\[,;!]/g, ' ')
+    .replace(/\d+(?:[.,]\d+)*/g, ' # ');
+  return t.match(/\\[a-z]+|[a-zà-ÿāīūṛṇṣ]+|#|[+\-−=×÷<>≤≥^/()°%₹√π]/g) ?? [];
+}
+
+/**
+ * A question's words and its maths, apart. Two questions are alike only when both their words and their maths are, so one
+ * equation asked about in two different ways is not a repeat, and the same words around different maths are not either.
+ */
+function parts(text: string): { words: string[]; maths: string[]; key: string } {
+  const words = tokens(text.replace(/\$[^$]*\$/g, ' M '));
+  const maths = tokens((text.match(/\$[^$]*\$/g) ?? []).join(' ').replace(/\$/g, ' '));
+  return { words, maths, key: `${words.join(' ')} | ${maths.join(' ')}` };
+}
+
+/** How many tokens must change to turn one into the other. */
+function distance(a: string[], b: string[]): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+const likeness = (a: string[], b: string[]) => 1 - distance(a, b) / Math.max(a.length, b.length, 1);
+const alike = (a: ReturnType<typeof parts>, b: ReturnType<typeof parts>) => Math.min(likeness(a.words, b.words), likeness(a.maths, b.maths));
+
+/** Two questions in one chapter at least this alike are listed. Set on 24 Nov 2026 by reading what the 830 gave. */
+const REPEAT_AT = 0.75;
+
+type Ref = { where: string; qq: LibraryQuestion };
+const repeats = new Map<string, string[]>();
+const note = (kind: string, refs: Ref[], detail: string) =>
+  repeats.set(kind, [...(repeats.get(kind) ?? []), `${refs.map((r) => r.where).join(' and ')}: ${detail}`]);
+const isFact = (qq: LibraryQuestion) => typeof qq.expect === 'string' && value(qq.expect) === null;
+const short = (s: string) => (s.length > 70 ? `${s.slice(0, 67)}...` : s);
+
+const bySkeleton = new Map<string, Ref[]>();
+const byOptions = new Map<string, Ref[]>();
+for (const book of books) {
+  for (const chapter of book.chapters) {
+    const refs = chapter.questions.map((qq, i) => ({ where: `Class ${book.classLevel} ${book.subject} / ${chapter.name} / Q${i + 1}`, qq }));
+    const toks = chapter.questions.map((qq) => parts(qq.text));
+    const answers = new Map<string, Ref[]>();
+    refs.forEach((r, i) => {
+      bySkeleton.set(toks[i].key, [...(bySkeleton.get(toks[i].key) ?? []), r]);
+      if (isFact(r.qq)) {
+        // The same four options in any order. Numeric options are left out: four small numbers often come up again by chance.
+        const opts = r.qq.options.map((o) => o.trim().toLowerCase()).sort().join(' | ');
+        byOptions.set(opts, [...(byOptions.get(opts) ?? []), r]);
+        const a = String(r.qq.expect).trim().toLowerCase();
+        answers.set(a, [...(answers.get(a) ?? []), r]);
+      }
+    });
+    for (const list of answers.values()) if (list.length > 1) note('two fact questions in a chapter with the same answer', list, `"${short(String(list[0].qq.expect))}"`);
+    for (let i = 0; i < toks.length; i++) {
+      for (let j = i + 1; j < toks.length; j++) {
+        if (toks[i].key === toks[j].key) continue; // listed below as the same question
+        const l = alike(toks[i], toks[j]);
+        if (l >= REPEAT_AT) note('two questions in a chapter that read nearly the same', [refs[i], refs[j]], `${Math.round(l * 100)}% alike`);
+      }
+    }
+  }
+}
+for (const list of bySkeleton.values()) if (list.length > 1) note('the same question once numbers and names are hidden', list, `"${short(list[0].qq.text)}"`);
+for (const list of byOptions.values()) if (list.length > 1) note('the same four options', list, `"${short(list[0].qq.options.join(' / '))}"`);
+
+const listAll = process.argv.includes('--list');
+if (repeats.size) {
+  console.log(`\nLikely repeats, to read (some overlap)${listAll ? '' : '; --list prints each'}:`);
+  for (const [kind, list] of repeats) {
+    console.log(`  ${kind}: ${list.length}`);
+    if (listAll) for (const m of list) console.log(`    ${m}`);
+  }
+}
+console.log(`\n${total} questions checked, ${failures} failure${failures === 1 ? '' : 's'}`);
+console.log(
+  `how each answer is known: worked out by code ${known.computed} (every wrong option read as a number in ${known.computedAllRead}), ` +
+    `text with a verify check ${known.textWithCheck}, text resting on the writer's review ${known.textOnly}`,
+);
 console.log(`right answers stored as A/B/C/D: ${spread.join(' / ')}`);
 process.exit(failures ? 1 : 0);

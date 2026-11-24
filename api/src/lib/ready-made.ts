@@ -4,7 +4,8 @@ import type { LibraryBook } from '../ready-made/types.ts';
 import { pool, tq, tq1, type Db } from './db.ts';
 
 // Ready-made questions (api/src/ready-made): original chapter-wise MCQs with worked solutions, written for the NCERT 2026-27
-// books of Classes 7 to 10 Maths and Classes 9 and 10 Science, ten a chapter, every answer proved by tools/check-library.ts.
+// books of Classes 7 to 10 Maths and Classes 9 and 10 Science, ten a chapter, checked by tools/check-library.ts (which proves
+// the answers that are numbers worked out by code; a text answer rests on review).
 // A tutor adds a book from the question picker of a group whose class and subject it covers (routes/ready-made.ts). Its
 // questions are copied in as the tuition's own (source 'library'), so they can be changed or deleted like any other, and
 // adding again brings back only the ones the tuition no longer has.

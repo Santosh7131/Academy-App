@@ -401,7 +401,10 @@ Deleting a paper also deletes the questions saved from it that no test uses.
 NCERT 2026-27 books (nothing is copied from a paper or a book): ten per chapter for Class 7
 Maths (Ganita Prakash, 15 chapters), Class 8 Maths (Ganita Prakash, 14), Class 9 Maths
 (Ganita Manjari, 14) and Science (Exploration, 13), and Class 10 Maths (14) and Science (13).
-That is 830 questions. Every answer is proved by `node tools/check-library.ts`.
+That is 830 questions. `node tools/check-library.ts` proves the answer of each of the 441 whose
+answer is a number worked out by code. For the 389 whose answer is text (a fact or a statement), it
+checks only that the options are sound, so those answers rest on review. It also lists likely
+repeats to read.
 
 Since 24 November 2026 every tuition can add them (they were hidden on 9 October 2026 in the
 original app, at its tutor's request). The test editor's question picker, for a group whose class
